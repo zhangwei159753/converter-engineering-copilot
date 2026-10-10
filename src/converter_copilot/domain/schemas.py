@@ -183,6 +183,7 @@ class TaskCreate(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def validate_mode_inputs(cls, value):
+        """Coerce request inputs through the schema selected by task mode."""
         if not isinstance(value, dict) or "mode" not in value or "inputs" not in value:
             return value
         mode = TaskMode(value["mode"])
@@ -200,6 +201,10 @@ class TaskRecord(BaseModel):
     inputs: dict[str, object]
     created_at: datetime
     updated_at: datetime
+    attempt: int = 0
+    max_attempts: int = 3
+    lease_expires_at: datetime | None = None
+    error_code: str | None = None
 
 
 class TaskEvent(BaseModel):
@@ -236,6 +241,7 @@ class ConverterReport(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def validate_mode_result(cls, value):
+        """Coerce report results through the schema selected by task mode."""
         if not isinstance(value, dict) or "mode" not in value or "result" not in value:
             return value
         mode = TaskMode(value["mode"])

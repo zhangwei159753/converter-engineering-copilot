@@ -6,7 +6,11 @@ from fastapi.testclient import TestClient
 from converter_copilot.agent.workflows import WorkflowDeps
 from converter_copilot.api.main import create_app
 from converter_copilot.api.runner import TaskRunner
-from converter_copilot.domain.schemas import FaultAnalysisReport, FaultHypothesis, RetrievedChunk
+from converter_copilot.domain.schemas import (
+    FaultAnalysisReport,
+    FaultHypothesis,
+    RetrievedChunk,
+)
 from converter_copilot.storage.sqlite_store import SQLiteStore
 
 
@@ -52,7 +56,7 @@ def test_health_readiness_and_fault_task_complete_with_traceable_evidence(tmp_pa
         assert readiness.status_code == 200
         assert readiness.json() == {
             "status": "ready",
-            "components": {"database": "ready"},
+            "components": {"database": "ready", "worker": "ready"},
         }
 
         response = client.post("/api/tasks", json={

@@ -46,6 +46,37 @@ class RuntimeConfig:
         return True
 
 
+@dataclass(frozen=True)
+class WorkerSettings:
+    """Validated settings for the local durable task worker."""
+
+    concurrency: int = 1
+    poll_seconds: float = 0.5
+    lease_seconds: int = 60
+    timeout_seconds: int = 1800
+    max_attempts: int = 3
+
+    def __post_init__(self) -> None:
+        """Reject zero, negative, or non-finite worker limits."""
+        import math
+
+        if self.concurrency <= 0 or self.lease_seconds <= 0 or self.timeout_seconds <= 0 or self.max_attempts <= 0:
+            raise ValueError("Worker concurrency, lease, timeout, and attempt limits must be positive.")
+        if not math.isfinite(self.poll_seconds) or self.poll_seconds <= 0:
+            raise ValueError("Worker poll interval must be a positive finite number.")
+
+    @classmethod
+    def from_env(cls) -> "WorkerSettings":
+        """Read worker limits from environment variables and validate them."""
+        return cls(
+            concurrency=int(os.getenv("CONVERTER_WORKER_CONCURRENCY", "1")),
+            poll_seconds=float(os.getenv("CONVERTER_WORKER_POLL_SECONDS", "0.5")),
+            lease_seconds=int(os.getenv("CONVERTER_TASK_LEASE_SECONDS", "60")),
+            timeout_seconds=int(os.getenv("CONVERTER_TASK_TIMEOUT_SECONDS", "1800")),
+            max_attempts=int(os.getenv("CONVERTER_TASK_MAX_ATTEMPTS", "3")),
+        )
+
+
 def tracing_run_config(*, task_id: str, mode: str) -> dict:
     """Return non-sensitive task and mode tags for LangChain/LangGraph runs."""
     return {

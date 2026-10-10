@@ -3,7 +3,7 @@
 import hashlib
 import json
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -227,6 +227,110 @@ class SQLiteStore:
             self._insert_event(connection, task_id, "complete", report.completion_status, message, now)
         return True
 
+    def claim_next_task(
+        self,
+        worker_id: str,
+        *,
+        lease_seconds: int,
+        max_attempts: int = 3,
+    ) -> TaskRecord | None:
+        """Atomically claim the oldest queued task and increment its attempt."""
+        if lease_seconds <= 0 or max_attempts <= 0:
+            raise ValueError("Lease and attempt limits must be positive.")
+        now = _now()
+        expires_at = now + timedelta(seconds=lease_seconds)
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            self._requeue_expired(connection, now)
+            row = connection.execute(
+                "SELECT * FROM tasks WHERE status = 'queued' AND attempt < max_attempts ORDER BY created_at, task_id LIMIT 1"
+            ).fetchone()
+            if row is None:
+                return None
+            attempt = int(row["attempt"]) + 1
+            task_id = row["task_id"]
+            connection.execute(
+                """UPDATE tasks SET status = 'running', updated_at = ?, attempt = ?, max_attempts = ?,
+                lease_owner = ?, lease_expires_at = ?, error_code = NULL WHERE task_id = ? AND status = 'queued'""",
+                (now.isoformat(), attempt, max_attempts, worker_id, expires_at.isoformat(), task_id),
+            )
+            self._insert_event(
+                connection, task_id, "workflow", "running", f"工作流开始执行（第 {attempt}/{max_attempts} 次）。", now
+            )
+        return self.get_task(task_id)
+
+    def renew_task_lease(self, task_id: str, worker_id: str, *, lease_seconds: int) -> bool:
+        """Extend a running task lease only for its current owner."""
+        if lease_seconds <= 0:
+            raise ValueError("Lease duration must be positive.")
+        now = _now()
+        expires_at = now + timedelta(seconds=lease_seconds)
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """UPDATE tasks SET lease_expires_at = ?, updated_at = ?
+                WHERE task_id = ? AND status = 'running' AND lease_owner = ?""",
+                (expires_at.isoformat(), now.isoformat(), task_id, worker_id),
+            )
+        return cursor.rowcount == 1
+
+    def requeue_expired_tasks(self) -> list[str]:
+        """Recover expired leases once, failing tasks that exhausted attempts."""
+        now = _now()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            return self._requeue_expired(connection, now)
+
+    def _requeue_expired(self, connection: sqlite3.Connection, now: datetime) -> list[str]:
+        rows = connection.execute(
+            """SELECT task_id, attempt, max_attempts FROM tasks
+            WHERE status = 'running' AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?
+            ORDER BY created_at, task_id""",
+            (now.isoformat(),),
+        ).fetchall()
+        recovered: list[str] = []
+        for row in rows:
+            task_id = row["task_id"]
+            exhausted = int(row["attempt"]) >= int(row["max_attempts"])
+            if exhausted:
+                connection.execute(
+                    """UPDATE tasks SET status = 'failed', updated_at = ?, lease_owner = NULL,
+                    lease_expires_at = NULL, error_code = 'attempt_limit' WHERE task_id = ? AND status = 'running'""",
+                    (now.isoformat(), task_id),
+                )
+                self._insert_event(
+                    connection, task_id, "failed", "failed", "任务达到最大执行次数，已停止自动恢复。", now
+                )
+            else:
+                connection.execute(
+                    """UPDATE tasks SET status = 'queued', updated_at = ?, lease_owner = NULL,
+                    lease_expires_at = NULL WHERE task_id = ? AND status = 'running'""",
+                    (now.isoformat(), task_id),
+                )
+                self._insert_event(
+                    connection, task_id, "recovered", "queued", "检测到执行租约过期，任务已重新排队。", now
+                )
+            recovered.append(task_id)
+        return recovered
+
+    def fail_task(self, task_id: str, *, worker_id: str, error_code: str) -> bool:
+        """Persist a safe terminal failure only while the caller owns the lease."""
+        now = _now()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            cursor = connection.execute(
+                """UPDATE tasks SET status = 'failed', updated_at = ?, lease_owner = NULL,
+                lease_expires_at = NULL, error_code = ?
+                WHERE task_id = ? AND status = 'running' AND lease_owner = ?""",
+                (now.isoformat(), error_code, task_id, worker_id),
+            )
+            if cursor.rowcount != 1:
+                return False
+            self._insert_event(
+                connection, task_id, "failed", "failed",
+                f"工作流执行失败（{error_code}）。可检查服务状态后重试。", now,
+            )
+        return True
+
     def record_retry(self, original_task_id: str, retry_task_id: str) -> None:
         """Record a retry relationship without modifying the previous attempt."""
         with self._connect() as connection:
@@ -334,4 +438,8 @@ class SQLiteStore:
             inputs=json.loads(row["inputs_json"]),
             created_at=row["created_at"],
             updated_at=row["updated_at"],
+            attempt=row["attempt"],
+            max_attempts=row["max_attempts"],
+            lease_expires_at=row["lease_expires_at"],
+            error_code=row["error_code"],
         )

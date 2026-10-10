@@ -216,3 +216,19 @@ def test_failed_workflow_status_and_events_remain_retrievable(tmp_path):
         assert task["status"] == "failed"
         events = client.get(f"/api/tasks/{task_id}/events").text
         assert '"status": "failed"' in events
+
+
+def test_migration_failure_keeps_liveness_and_marks_readiness_unavailable(tmp_path, monkeypatch):
+    store = SQLiteStore(tmp_path / "migration-error.db")
+    runner = TaskRunner(store=store, deps_provider=lambda: WorkflowDeps(model=NeverModel(), search=EmptySearch(), vector_index=EmptyIndex()))
+
+    def fail_initialization():
+        raise RuntimeError("private migration detail")
+
+    monkeypatch.setattr(store, "initialize", fail_initialization)
+    with TestClient(create_app(runner=runner)) as client:
+        assert client.get("/api/health").status_code == 200
+        readiness = client.get("/api/ready")
+        assert readiness.status_code == 503
+        assert readiness.json()["components"]["database"] == "unavailable"
+        assert "private migration detail" not in readiness.text
