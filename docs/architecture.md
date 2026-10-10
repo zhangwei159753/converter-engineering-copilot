@@ -11,6 +11,7 @@ flowchart LR
   Graph --> Search[Optional Tavily search]
   Graph --> Chroma[Chroma vector index]
   API --> SQLite[SQLite tasks, events, reports, cases]
+  API --> Reviews[SQLite evaluation bundles and review history]
   Chroma --> Embeddings[Local FastEmbed BGE-small-zh model]
   WebContainer[Nginx web container] -->|/api proxy| API
 ```
@@ -38,6 +39,7 @@ The repository retains the upstream `open_deep_research` graph. The added `conve
 - Run one API process against a local data directory. SQLite and Chroma do not support this app's shared single-instance worker contract across multiple API replicas.
 - Chroma: `.data/chroma` by default, using the local FastEmbed BGE-small-zh model unless an embedding function is injected for tests. The DeepSeek-backed collection has a versioned name so existing OpenAI vectors remain untouched; re-import source documents to populate it.
 - Evaluation output: `.data/evaluation_results/` by default.
+- Evaluation review: a versioned review bundle captures task claims and evidence snapshots. Review labels and append-only revisions are stored in SQLite; retrieval/support metrics exclude all examples without explicit human-reviewed labels and report null with `insufficient_labels` when no eligible sample exists. Local reviewer IDs are free-text attribution, not authentication.
 - Worker defaults: concurrency `1`, poll interval `0.5` seconds, lease `60` seconds, timeout `1800` seconds, and maximum attempts `3`. Override them with the `CONVERTER_WORKER_*` and `CONVERTER_TASK_*` environment variables; invalid non-positive values prevent readiness.
 - Optional LangSmith tracing is enabled only when `LANGSMITH_TRACING=true` and `LANGSMITH_API_KEY` is present. Each run is tagged with task ID and mode. Traces can include prompts and model inputs, so enable them only for data approved for that workspace.
 
@@ -53,3 +55,7 @@ For local development, Vite proxies `/api` to `http://localhost:8000`. In Compos
 - A citation marked `supported` means the report's evidence ID resolves and its source is not marked conflicting. It is not an independent fact check.
 - Case similarity is a retrieval hint, not a causal conclusion. Synthetic demo rows are clearly identified in the source dataset and must not be represented as field history.
 - The app does not connect to equipment or issue control commands. A qualified engineer must verify findings against source manuals, measurements, and site procedures.
+
+## Roadmap boundaries
+
+Read-only enterprise work-order or telemetry connectors and scheduled analysis can be explored as future work with explicit operator review. Authentication, teams, and multi-tenancy require a separate security and data-isolation design. Device write/control, automatic parameter dispatch, and replacing site safety procedures remain excluded.

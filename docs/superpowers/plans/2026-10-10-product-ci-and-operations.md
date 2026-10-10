@@ -79,7 +79,7 @@
 - Modify: `.env.example`
 - Create: `docs/operations.md`
 
-- [ ] Document setup, local single-instance data paths, backup-before-migration, task recovery settings, import validation/repair, evaluation review, health/readiness, and CI checks.
-- [ ] Add roadmap boundaries: future read-only enterprise connectors and scheduled analysis may be explored; account/multitenancy requires a separate design; device write/control and SOP replacement remain excluded.
-- [ ] Check every shell command against existing `uv`/npm/Docker scripts and ensure no credentials appear in examples.
-- [ ] Commit as `docs: add local operations and product roadmap`.
+- [x] Document setup, local single-instance data paths, backup-before-migration, task recovery settings, import validation/repair, evaluation review, health/readiness, and CI checks.
+- [x] Add roadmap boundaries: future read-only enterprise connectors and scheduled analysis may be explored; account/multitenancy requires a separate design; device write/control and SOP replacement remain excluded.
+- [x] Check every shell command against existing `uv`/npm/Docker scripts and ensure no credentials appear in examples.
+- [x] Commit as `docs: add local operations and product roadmap`.
