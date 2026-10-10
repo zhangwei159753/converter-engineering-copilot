@@ -2,7 +2,9 @@
 
 import argparse
 import asyncio
+import hashlib
 import json
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -10,8 +12,8 @@ from converter_copilot.agent.entrypoint import build_default_deps
 from converter_copilot.agent.workflows import build_workflow
 from converter_copilot.config import RuntimeConfig
 from converter_copilot.domain.schemas import TaskMode
+from converter_copilot.evaluation.dataset import validate_dataset
 from converter_copilot.evaluation.runner import evaluate_records
-
 
 HERE = Path(__file__).resolve().parent
 
@@ -44,11 +46,26 @@ async def _run(modes: list[str], output_dir: Path, recall_at_k: int) -> list[dic
         mode = TaskMode(mode_name)
         dataset = HERE / f"{mode.value}.jsonl"
         records = _load_jsonl(dataset)
+        issues = validate_dataset(records, mode=mode.value)
+        if issues:
+            issue = issues[0]
+            raise ValueError(f"{dataset.name}:{issue.line_number}:{issue.field}: {issue.message}")
+        dataset_version = hashlib.sha256(dataset.read_bytes()).hexdigest()[:16]
         graph = build_workflow(mode, deps)
-        summary = await evaluate_records(mode=mode.value, records=records, graph=graph, recall_at_k=recall_at_k)
+        summary = await evaluate_records(
+            mode=mode.value,
+            records=records,
+            graph=graph,
+            recall_at_k=recall_at_k,
+            dataset_version=dataset_version,
+        )
         summary["dataset"] = str(dataset.relative_to(HERE.parent.parent))
         summary["generated_at"] = datetime.now(timezone.utc).isoformat()
         summary["tracing_enabled"] = config.tracing_enabled
+        review_bundle = summary.pop("review_bundle")
+        bundle_target = output_dir / f"{mode.value}-{stamp}-review.json"
+        bundle_target.write_text(json.dumps(review_bundle, ensure_ascii=False, indent=2), encoding="utf-8")
+        summary["review_bundle_file"] = str(bundle_target)
         target = output_dir / f"{mode.value}-{stamp}.json"
         target.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
         summary["result_file"] = str(target)
@@ -57,6 +74,7 @@ async def _run(modes: list[str], output_dir: Path, recall_at_k: int) -> list[dic
 
 
 def main() -> int:
+    """Validate datasets, run selected workflows, and write local artifacts."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mode", choices=[TaskMode.FAULT_ANALYSIS.value, TaskMode.TECHNICAL_RESEARCH.value], action="append")
     parser.add_argument("--output-dir", type=Path, default=Path(".data/evaluation_results"))
@@ -69,7 +87,7 @@ def main() -> int:
         results = asyncio.run(_run(modes, args.output_dir, args.recall_at_k))
     except (RuntimeError, ValueError) as error:
         parser.exit(2, f"Evaluation stopped: {error}\n")
-    print(json.dumps(results, ensure_ascii=False, indent=2))
+    sys.stdout.write(json.dumps(results, ensure_ascii=False, indent=2) + "\n")
     return 0
 
 

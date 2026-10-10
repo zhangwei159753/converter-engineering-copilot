@@ -57,6 +57,7 @@ def build_evaluation_summary(
     latencies_ms: Sequence[float],
     costs_usd: Sequence[float],
     failures: Sequence[Mapping[str, str]],
+    metric_sample_counts: Mapping[str, int] | None = None,
 ) -> dict[str, Any]:
     """Build a JSON-ready summary while keeping unavailable measurements null."""
     latency = {
@@ -65,6 +66,28 @@ def build_evaluation_summary(
         "max": max(latencies_ms) if latencies_ms else None,
         "sample_count": len(latencies_ms),
     }
+    sample_counts = {
+        "retrieval_labeled_examples": 0,
+        "reviewed_evidence_labels": 0,
+        "citation_claims": 0,
+        "schema_examples": example_count,
+        **dict(metric_sample_counts or {}),
+    }
+    metric_status = {
+        "retrieval_recall_at_k": "measured" if retrieval_recall is not None else "insufficient_labels",
+        "citation_coverage": "measured" if citation_coverage is not None else "insufficient_outputs",
+        "schema_pass_rate": "measured" if schema_pass_rate is not None else "insufficient_outputs",
+        "manual_evidence_support_rate": "measured" if evidence_support_rate is not None else "insufficient_labels",
+    }
+    metric_reasons = {
+        key: (
+            "No human-reviewed gold labels are available."
+            if status == "insufficient_labels"
+            else "No eligible generated outputs are available."
+        )
+        for key, status in metric_status.items()
+        if status.startswith("insufficient")
+    }
     return {
         "mode": mode,
         "example_count": example_count,
@@ -72,6 +95,9 @@ def build_evaluation_summary(
         "citation_coverage": citation_coverage,
         "schema_pass_rate": schema_pass_rate,
         "manual_evidence_support_rate": evidence_support_rate,
+        "metric_status": metric_status,
+        "metric_sample_counts": sample_counts,
+        "metric_reasons": metric_reasons,
         "latency_ms": latency,
         "cost_usd": fmean(costs_usd) if costs_usd else None,
         "cost_sample_count": len(costs_usd),

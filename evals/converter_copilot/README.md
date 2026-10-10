@@ -17,7 +17,13 @@ The runner requires `DEEPSEEK_API_KEY` because it executes the selected LangGrap
 - `manual_evidence_support_rate` uses only `supported` and `unsupported` labels. `unverified` and missing labels are excluded.
 - Latency is measured locally around each graph invocation. It is not a provider-side latency metric.
 
-The included examples are starter scenarios, not a validated benchmark. They intentionally have empty retrieval gold labels and `unverified` evidence labels, so recall and manual support rate are reported as `null` until a reviewer labels the target evidence. Do not replace these with guessed labels or present starter numbers as quality claims. Add one JSON object per line; each record needs a unique `example_id`, typed workflow `inputs`, an `expected_retrieval_ids` list, and optionally `manual_evidence_labels`.
+The included examples are synthetic starter scenarios, not a validated benchmark. They have `label_status: "unreviewed"`, empty retrieval gold labels, and no evidence labels, so recall and manual support rate are reported as `null` with `insufficient_labels`. The CLI validates every row and stops with the file, line, and field for malformed data. Validation messages do not echo source text.
+
+Each live run writes a separate `*-review.json` bundle next to the metric summary. Import that bundle from the Web application's **人工评测** page. The review queue stores the dataset version, generated claims, evidence excerpts and locators, and immutable snapshots in SQLite. A reviewer can mark each evidence/claim pair as `supported`, `unsupported`, or `unverified`, and select expected retrieval IDs from the snapshot inventory.
+
+Saving a review requires a nonblank local reviewer identifier. The server records the UTC review time and increments `label_version`; later edits append another event and preserve earlier labels in history. This identifier is free-text attribution in this single-user local app, not a verified account or authorization identity. Do not import files containing unauthorized or sensitive field data.
+
+Only explicit human reviews contribute to retrieval and evidence-support metrics. `metric_sample_counts` reports eligible examples and labels; `metric_status` is `insufficient_labels` and the metric is `null` when no eligible labels exist. The API summary computes retrieval recall over reviewed non-empty gold sets and the captured evidence inventory. Build a named/versioned benchmark baseline only after reviewing the dataset, recording its source and reviewer process, and rerunning it against a fixed model/configuration. A human evidence label records a reviewer judgment about a snapshot; it does not establish field correctness or maintenance benefit.
 
 ## Optional LangSmith tracing
 

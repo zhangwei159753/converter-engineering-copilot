@@ -1,6 +1,7 @@
-from datetime import datetime, timezone
 import asyncio
+from datetime import datetime, timezone
 
+from converter_copilot.config import tracing_run_config
 from converter_copilot.domain.schemas import (
     Claim,
     ConverterReport,
@@ -8,7 +9,6 @@ from converter_copilot.domain.schemas import (
     FaultAnalysisReport,
     TaskMode,
 )
-from converter_copilot.config import tracing_run_config
 from converter_copilot.evaluation.runner import evaluate_records
 
 
@@ -48,9 +48,14 @@ def test_evaluation_runs_with_tagged_task_and_reports_metrics():
         mode="fault_analysis",
         records=[{
             "example_id": "fixture-1",
+            "source_type": "reviewed_test_fixture",
+            "label_status": "reviewed",
+            "reviewer_id": "test-reviewer",
+            "reviewed_at": "2026-10-10T00:00:00Z",
+            "label_version": 1,
             "inputs": {"equipment_type": "inverter", "symptom": "alarm", "operating_conditions": {"load": "50%"}},
             "expected_retrieval_ids": ["ev-1"],
-            "manual_evidence_labels": ["supported"],
+            "manual_evidence_labels": [{"evidence_id": "ev-1", "claim_id": "c1", "label": "supported"}],
         }],
         graph=graph,
     ))
@@ -62,6 +67,12 @@ def test_evaluation_runs_with_tagged_task_and_reports_metrics():
     assert result["cost_usd"] is None
     assert graph.configs[0]["metadata"]["mode"] == "fault_analysis"
     assert result["outcomes"][0]["status"] == "completed"
+    bundle = result["review_bundle"]
+    assert bundle["dataset_version"] == "unspecified"
+    assert bundle["examples"][0]["evidence"][0]["excerpt"] == "example"
+    assert bundle["examples"][0]["evidence"][0]["related_claim_ids"] == ["c1"]
+    assert "prompt" not in str(bundle).lower()
+    assert "api_key" not in str(bundle).lower()
 
 
 def test_evaluation_records_individual_failures_and_continues():
@@ -86,3 +97,40 @@ def test_trace_config_contains_task_and_mode_but_no_secret_fields():
     assert "mode:fault_analysis" in config["tags"]
     assert config["metadata"] == {"task_id": "eval-example", "mode": "fault_analysis"}
     assert "api_key" not in str(config).lower()
+
+
+def test_unreviewed_support_labels_are_not_scored_and_explain_insufficient_samples():
+    graph = FakeGraph(report=_report())
+    result = asyncio.run(evaluate_records(
+        mode="fault_analysis",
+        records=[{
+            "example_id": "starter-1",
+            "source_type": "synthetic_demo_fixture",
+            "label_status": "unreviewed",
+            "inputs": {"equipment_type": "inverter", "symptom": "alarm"},
+            "expected_retrieval_ids": [],
+            "manual_evidence_labels": [{"evidence_id": "ev-1", "claim_id": "c1", "label": "supported"}],
+        }],
+        graph=graph,
+    ))
+
+    assert result["manual_evidence_support_rate"] is None
+    assert result["retrieval_recall_at_k"] is None
+    assert result["metric_status"]["manual_evidence_support_rate"] == "insufficient_labels"
+    assert result["metric_status"]["retrieval_recall_at_k"] == "insufficient_labels"
+    assert result["metric_sample_counts"]["reviewed_evidence_labels"] == 0
+
+
+def test_empty_gold_labels_report_insufficient_labels_even_for_reviewed_examples():
+    result = asyncio.run(evaluate_records(
+        mode="fault_analysis",
+        records=[{
+            "example_id": "reviewed-no-gold", "source_type": "human_reviewed",
+            "label_status": "reviewed", "expected_retrieval_ids": [], "manual_evidence_labels": [],
+            "inputs": {"equipment_type": "inverter", "symptom": "alarm"},
+        }],
+        graph=FakeGraph(report=_report()),
+    ))
+    assert result["retrieval_recall_at_k"] is None
+    assert result["metric_status"]["retrieval_recall_at_k"] == "insufficient_labels"
+    assert result["metric_sample_counts"]["retrieval_labeled_examples"] == 0

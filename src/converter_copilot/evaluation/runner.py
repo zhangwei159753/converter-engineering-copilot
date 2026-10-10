@@ -1,7 +1,10 @@
 """Async evaluation runner shared by the CLI and mocked harness tests."""
 
+import hashlib
+import json
 import time
 from collections.abc import Mapping, Sequence
+from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -22,6 +25,7 @@ async def evaluate_records(
     records: Sequence[Mapping[str, Any]],
     graph: Any,
     recall_at_k: int = 5,
+    dataset_version: str = "unspecified",
 ) -> dict[str, Any]:
     """Invoke a workflow for each curated record and return metrics plus outcomes."""
     latencies: list[float] = []
@@ -32,6 +36,7 @@ async def evaluate_records(
     manual_labels: list[str | None] = []
     failures: list[dict[str, str]] = []
     outcomes: list[dict[str, Any]] = []
+    review_examples: list[dict[str, Any]] = []
 
     for index, record in enumerate(records, start=1):
         example_id = str(record.get("example_id", f"{mode}-{index}"))
@@ -50,9 +55,18 @@ async def evaluate_records(
             latencies.append(latency)
             schema_results.append(True)
             claims.extend(report.claims)
-            expected_ids.append(list(record.get("expected_retrieval_ids", [])))
-            retrieved_ids.append([item.evidence_id for item in report.evidence])
-            manual_labels.extend(record.get("manual_evidence_labels", []))
+            reviewed = record.get("label_status") == "reviewed"
+            claim_ids_by_evidence: dict[str, list[str]] = {}
+            for claim in report.claims:
+                for evidence_id in claim.evidence_ids:
+                    claim_ids_by_evidence.setdefault(evidence_id, []).append(claim.claim_id)
+            if reviewed:
+                expected_ids.append(list(record.get("expected_retrieval_ids", [])))
+                retrieved_ids.append([item.evidence_id for item in report.evidence])
+                manual_labels.extend(
+                    label.get("label") for label in record.get("manual_evidence_labels", [])
+                    if isinstance(label, Mapping)
+                )
             outcomes.append({
                 "example_id": example_id,
                 "task_id": task_id,
@@ -62,13 +76,39 @@ async def evaluate_records(
                 "evidence_count": len(report.evidence),
                 "quality_warnings": report.quality_warnings,
             })
+            review_examples.append({
+                "example_id": example_id,
+                "source_type": str(record.get("source_type", "unknown")),
+                "inputs": request.inputs.model_dump(mode="json"),
+                "task_id": task_id,
+                "claims": [
+                    {"claim_id": claim.claim_id, "text": claim.text, "evidence_ids": claim.evidence_ids}
+                    for claim in report.claims
+                ],
+                "evidence": [
+                    {
+                        "evidence_id": item.evidence_id,
+                        "excerpt": item.excerpt,
+                        "source_type": item.source_type,
+                        "locator": item.locator,
+                        "url": item.url,
+                        "source_status": item.source_status,
+                        "related_claim_ids": sorted(set(item.related_claim_ids + claim_ids_by_evidence.get(item.evidence_id, []))),
+                    }
+                    for item in report.evidence
+                ],
+            })
         except Exception as error:
             latency = (time.perf_counter() - started) * 1000
             latencies.append(latency)
             schema_results.append(False)
-            expected_ids.append(list(record.get("expected_retrieval_ids", [])))
-            retrieved_ids.append([])
-            manual_labels.extend(record.get("manual_evidence_labels", []))
+            if record.get("label_status") == "reviewed":
+                expected_ids.append(list(record.get("expected_retrieval_ids", [])))
+                retrieved_ids.append([])
+                manual_labels.extend(
+                    label.get("label") for label in record.get("manual_evidence_labels", [])
+                    if isinstance(label, Mapping)
+                )
             # Exception text can contain request details or provider secrets; keep the
             # persisted result useful for triage without serializing that payload.
             failure = {
@@ -78,6 +118,27 @@ async def evaluate_records(
             }
             failures.append(failure)
             outcomes.append({"example_id": example_id, "task_id": task_id, "status": "failed", "latency_ms": round(latency, 3), "error": failure})
+            review_examples.append({
+                "example_id": example_id,
+                "source_type": str(record.get("source_type", "unknown")),
+                "inputs": record.get("inputs", {}),
+                "task_id": task_id,
+                "claims": [],
+                "evidence": [],
+            })
+
+    reviewed_labels = [label for label in manual_labels if label in {"supported", "unsupported"}]
+    bundle_payload = {
+        "bundle_id": f"review-{uuid4().hex}",
+        "mode": mode,
+        "dataset_version": dataset_version,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "examples": review_examples,
+    }
+    bundle_hash = hashlib.sha256(
+        json.dumps(bundle_payload, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()
+    ).hexdigest()
+    bundle_payload["bundle_id"] = f"review-{bundle_hash[:32]}"
 
     summary = build_evaluation_summary(
         mode=mode,
@@ -89,7 +150,13 @@ async def evaluate_records(
         latencies_ms=latencies,
         costs_usd=[],
         failures=failures,
+        metric_sample_counts={
+            "retrieval_labeled_examples": sum(bool(item) for item in expected_ids),
+            "reviewed_evidence_labels": len(reviewed_labels),
+            "citation_claims": len(claims),
+        },
     )
     summary["recall_at_k"] = recall_at_k
     summary["outcomes"] = outcomes
+    summary["review_bundle"] = bundle_payload
     return summary

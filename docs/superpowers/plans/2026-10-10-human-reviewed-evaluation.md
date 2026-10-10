@@ -47,12 +47,12 @@
 - Each live CLI run exports `review_bundle.json` with `bundle_id`, dataset/mode, and per-example task ID, claims, and evidence snapshots (`evidence_id`, excerpt, source type, locator, URL); it contains no prompts or secrets.
 - Bundle names are `{mode}-{UTC timestamp}-review.json` in the selected evaluation output directory; each evidence snapshot carries the matching claim IDs and source-status value.
 
-- [ ] Add tests `test_unreviewed_support_labels_are_not_scored`, `test_empty_gold_labels_report_insufficient_labels`, `test_reviewed_labels_require_reviewer_and_timestamp`, and `test_duplicate_example_id_reports_location`.
-- [ ] Run `uv run pytest tests/converter_copilot/test_eval_metrics.py tests/converter_copilot/test_eval_runner.py -q`; expected: explicit status/metadata assertions fail.
-- [ ] Add Pydantic or equivalent typed dataset validation and update all three existing JSONL files with explicit `source_type`/`label_status` values while retaining them as unreviewed; extend `evaluate_records` to emit the review bundle snapshots from the returned `ConverterReport`.
-- [ ] Make metric aggregation ignore labels unless `label_status == "reviewed"`; return `null` and `insufficient_labels` when the corresponding eligible sample count is zero.
-- [ ] Re-run targeted tests; expected: no starter dataset yields a fabricated retrieval or evidence-support score.
-- [ ] Commit as `feat: validate evaluation review labels`.
+- [x] Add tests `test_unreviewed_support_labels_are_not_scored`, `test_empty_gold_labels_report_insufficient_labels`, `test_reviewed_labels_require_reviewer_and_timestamp`, and `test_duplicate_example_id_reports_location`.
+- [x] Run `uv run pytest tests/converter_copilot/test_eval_metrics.py tests/converter_copilot/test_eval_runner.py -q`; expected: explicit status/metadata assertions fail.
+- [x] Add Pydantic or equivalent typed dataset validation and update all three existing JSONL files with explicit `source_type`/`label_status` values while retaining them as unreviewed; extend `evaluate_records` to emit the review bundle snapshots from the returned `ConverterReport`.
+- [x] Make metric aggregation ignore labels unless `label_status == "reviewed"`; return `null` and `insufficient_labels` when the corresponding eligible sample count is zero.
+- [x] Re-run targeted tests; expected: no starter dataset yields a fabricated retrieval or evidence-support score.
+- [x] Commit as `feat: validate evaluation review labels`.
 
 ### Task 2: Store reviewed labels and audit changes
 

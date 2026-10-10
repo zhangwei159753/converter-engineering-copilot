@@ -1,3 +1,4 @@
+from converter_copilot.evaluation.dataset import validate_dataset
 from converter_copilot.evaluation.metrics import (
     build_evaluation_summary,
     compute_citation_coverage,
@@ -52,3 +53,32 @@ def test_summary_preserves_missing_cost_data_as_null():
     assert summary["cost_usd"] is None
     assert summary["retrieval_recall_at_k"] is None
     assert summary["failures"] == []
+
+
+def _valid_dataset_row(**updates):
+    record = {
+        "example_id": "fixture-1",
+        "source_type": "synthetic_demo_fixture",
+        "label_status": "unreviewed",
+        "inputs": {"equipment_type": "inverter", "symptom": "overvoltage"},
+        "expected_retrieval_ids": [],
+        "manual_evidence_labels": [],
+    }
+    return {**record, **updates}
+
+
+def test_reviewed_labels_require_reviewer_and_timestamp():
+    issues = validate_dataset([_valid_dataset_row(label_status="reviewed")], mode="fault_analysis")
+
+    assert {issue.field for issue in issues} == {"reviewer_id", "reviewed_at", "label_version"}
+
+
+def test_duplicate_example_id_reports_location_without_source_text():
+    issues = validate_dataset(
+        [_valid_dataset_row(), _valid_dataset_row()],
+        mode="fault_analysis",
+    )
+
+    duplicate = next(issue for issue in issues if issue.field == "example_id")
+    assert duplicate.line_number == 2
+    assert "fixture-1" not in duplicate.message
