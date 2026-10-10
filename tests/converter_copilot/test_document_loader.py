@@ -3,7 +3,12 @@ import csv
 import fitz
 import pytest
 
+from converter_copilot.config import ImportLimits
 from converter_copilot.retrieval.document_loader import DocumentLoadError, load_document
+from converter_copilot.retrieval.import_validation import (
+    ImportValidationError,
+    validate_upload,
+)
 
 
 def test_pdf_chunks_keep_page_locator(tmp_path):
@@ -48,3 +53,22 @@ def test_unsupported_empty_or_malformed_documents_raise_typed_error(tmp_path, fi
     path.write_bytes(content)
     with pytest.raises(DocumentLoadError):
         load_document(path, task_id="task-1")
+
+
+def test_import_limits_load_from_environment_and_reject_non_positive_values(monkeypatch):
+    monkeypatch.setenv("IMPORT_MAX_BYTES", "1234")
+    monkeypatch.setenv("IMPORT_MAX_PDF_PAGES", "7")
+    monkeypatch.setenv("IMPORT_MAX_CSV_ROWS", "8")
+    monkeypatch.setenv("IMPORT_MAX_CHUNKS", "9")
+
+    assert ImportLimits.from_env() == ImportLimits(max_bytes=1234, max_pdf_pages=7, max_csv_rows=8, max_chunks=9)
+    with pytest.raises(ValueError, match="must be positive"):
+        ImportLimits(max_chunks=0)
+
+
+def test_invalid_utf8_upload_returns_safe_validation_error():
+    with pytest.raises(ImportValidationError) as error:
+        validate_upload("notes.md", b"\xff\xfe private document text", ImportLimits())
+
+    assert error.value.detail["code"] == "invalid_utf8"
+    assert "private document text" not in str(error.value)

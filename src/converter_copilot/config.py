@@ -78,6 +78,32 @@ class WorkerSettings:
         )
 
 
+@dataclass(frozen=True)
+class ImportLimits:
+    """Validated local upload ceilings applied before import side effects."""
+
+    max_bytes: int = 20 * 1024 * 1024
+    max_pdf_pages: int = 200
+    max_csv_rows: int = 10_000
+    max_chunks: int = 2_000
+
+    def __post_init__(self) -> None:
+        """Reject limits that would disable bounded import processing."""
+        if min(self.max_bytes, self.max_pdf_pages, self.max_csv_rows, self.max_chunks) <= 0:
+            raise ValueError("Import limits must be positive.")
+
+    @classmethod
+    def from_env(cls) -> "ImportLimits":
+        """Load bounded upload limits from the local environment."""
+        load_dotenv()
+        return cls(
+            max_bytes=int(os.getenv("IMPORT_MAX_BYTES", str(20 * 1024 * 1024))),
+            max_pdf_pages=int(os.getenv("IMPORT_MAX_PDF_PAGES", "200")),
+            max_csv_rows=int(os.getenv("IMPORT_MAX_CSV_ROWS", "10000")),
+            max_chunks=int(os.getenv("IMPORT_MAX_CHUNKS", "2000")),
+        )
+
+
 def tracing_run_config(*, task_id: str, mode: str) -> dict:
     """Return non-sensitive task and mode tags for LangChain/LangGraph runs."""
     return {
