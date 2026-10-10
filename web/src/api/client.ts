@@ -1,4 +1,4 @@
-import type { CaseImportResult, ConverterReport, TaskAccepted, TaskEvent, TaskRecord } from "../types";
+import type { CaseImportResult, ConverterReport, ImportSummary, TaskAccepted, TaskEvent, TaskRecord } from "../types";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -12,7 +12,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     let message = `Request failed (${response.status})`;
     try {
       const body = await response.json();
-      message = body.detail ?? message;
+      const detail = body.detail;
+      message = typeof detail === "string"
+        ? detail
+        : typeof detail?.message === "string"
+          ? detail.message
+          : message;
     } catch {
       // Keep the status-based message when the server did not return JSON.
     }
@@ -52,6 +57,18 @@ export function importCases(file: File): Promise<CaseImportResult> {
   const form = new FormData();
   form.append("file", file);
   return request<CaseImportResult>("/api/cases/import", { method: "POST", body: form });
+}
+
+export function listImports(): Promise<ImportSummary[]> {
+  return request<ImportSummary[]>("/api/imports");
+}
+
+export function repairImport(importId: string): Promise<ImportSummary> {
+  return request<ImportSummary>(`/api/imports/${encodeURIComponent(importId)}/repair`, { method: "POST" });
+}
+
+export function deleteImport(importId: string): Promise<ImportSummary> {
+  return request<ImportSummary>(`/api/imports/${encodeURIComponent(importId)}`, { method: "DELETE" });
 }
 
 const pause = (milliseconds: number, signal: AbortSignal) => new Promise<void>((resolve) => {

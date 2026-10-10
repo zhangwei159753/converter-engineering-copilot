@@ -17,6 +17,8 @@ class CaseImportResult(BaseModel):
     document_ids: list[str]
     chunk_count: int
     imported_case_count: int
+    import_id: str
+    reused: bool = False
 
 
 class ImportSummary(BaseModel):
@@ -35,3 +37,4 @@ class ImportSummary(BaseModel):
     created_at: str
     updated_at: str
     error_code: str | None = None
+    synthetic_demo: bool = False

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createTask, retryTask } from "./client";
+import { createTask, deleteImport, importCases, listImports, repairImport, retryTask } from "./client";
 
 describe("task API idempotency", () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -17,5 +17,34 @@ describe("task API idempotency", () => {
     expect(retryHeaders["Idempotency-Key"]).toBeTruthy();
     expect(retryHeaders["Idempotency-Key"]).not.toBe(createHeaders["Idempotency-Key"]);
     expect(fetchMock.mock.calls[1][0]).toBe("/api/tasks/task%20%2F%201/retry");
+  });
+});
+
+describe("source import API", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("uses the import ledger endpoints with encoded identifiers", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => [] });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await listImports();
+    await repairImport("import / 1");
+    await deleteImport("import / 1");
+
+    expect(fetchMock.mock.calls.map(([url, init]) => [url, init?.method])).toEqual([
+      ["/api/imports", undefined],
+      ["/api/imports/import%20%2F%201/repair", "POST"],
+      ["/api/imports/import%20%2F%201", "DELETE"],
+    ]);
+  });
+
+  it("turns structured validation details into readable messages", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: false,
+      status: 422,
+      json: async () => ({ detail: { code: "missing_required_field", message: "CSV row 2 is missing symptom.", filename: "cases.csv", row: 2 } }),
+    }));
+
+    await expect(importCases(new File(["symptom"], "cases.csv"))).rejects.toThrow("CSV row 2 is missing symptom.");
   });
 });

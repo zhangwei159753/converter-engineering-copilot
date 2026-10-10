@@ -69,6 +69,18 @@ def build_case_router(runner: TaskRunner) -> APIRouter:
                     document_ids=[import_record.document_id],
                     chunk_count=import_record.indexed_chunks,
                     imported_case_count=import_record.imported_cases,
+                    import_id=validated.import_id,
+                    reused=True,
+                )
+            await runner.reconcile_imports(validated.import_id)
+            import_record = runner.store.get_import(validated.import_id)
+            if import_record is not None and import_record.status == ImportStatus.COMPLETE:
+                return CaseImportResult(
+                    document_ids=[import_record.document_id],
+                    chunk_count=import_record.indexed_chunks,
+                    imported_case_count=import_record.imported_cases,
+                    import_id=validated.import_id,
+                    reused=True,
                 )
             raise HTTPException(
                 status_code=409,
@@ -108,6 +120,7 @@ def build_case_router(runner: TaskRunner) -> APIRouter:
                     validation_result=row.get("validation_result") or None,
                     handling_result=row.get("handling_result") or None,
                     evidence_ids=[chunk.chunk_id for chunk in chunks if chunk.locator == f"row {row_number}"],
+                    source_type=row.get("record_type") or row.get("source_type"),
                 ))
 
         runner.store.save_import_chunks(validated.import_id, chunks)
@@ -131,6 +144,8 @@ def build_case_router(runner: TaskRunner) -> APIRouter:
             document_ids=sorted({chunk.document_id for chunk in chunks}),
             chunk_count=len(chunks),
             imported_case_count=imported_cases,
+            import_id=validated.import_id,
+            reused=False,
         )
 
     @router.get("")
@@ -159,6 +174,7 @@ def build_import_router(runner: TaskRunner) -> APIRouter:
             created_at=record.created_at.isoformat(),
             updated_at=record.updated_at.isoformat(),
             error_code=record.error_code,
+            synthetic_demo=runner.store.import_is_synthetic(record.import_id),
         )
 
     @router.get("", response_model=list[ImportSummary])

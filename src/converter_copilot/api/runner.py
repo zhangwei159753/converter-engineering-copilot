@@ -197,6 +197,7 @@ class TaskRunner:
                     validation_result=row.get("validation_result") or None,
                     handling_result=row.get("handling_result") or None,
                     evidence_ids=matching_chunks,
+                    source_type=row.get("record_type") or row.get("source_type"),
                 ))
             return cases
         cases = []

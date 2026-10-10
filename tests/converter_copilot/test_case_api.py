@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 from converter_copilot.agent.workflows import WorkflowDeps
@@ -70,6 +72,23 @@ def test_identical_csv_upload_reuses_import_case_and_vector_identity(tmp_path):
     assert len(store.list_cases()) == 1
 
 
+def test_reupload_restores_missing_retained_source_and_repairs_import(tmp_path):
+    client, store, index = _client(tmp_path)
+    upload = ("cases.csv", "symptom,equipment_type\nDC overvoltage,PV inverter\n", "text/csv")
+    first = client.post("/api/cases/import", files={"file": upload})
+    record = store.get_import(first.json()["import_id"])
+    Path(record.source_path).unlink()
+
+    assert client.get("/api/imports").json()[0]["error_code"] == "source_missing"
+    repaired = client.post("/api/cases/import", files={"file": upload})
+
+    assert repaired.status_code == 201
+    assert repaired.json()["reused"] is True
+    assert store.get_import(record.import_id).status.value == "complete"
+    assert Path(record.source_path).is_file()
+    assert len(store.list_cases()) == 1
+
+
 def test_import_api_hides_source_path_and_delete_removes_imported_artifacts(tmp_path):
     client, store, index = _client(tmp_path)
     response = client.post(
@@ -91,6 +110,21 @@ def test_import_api_hides_source_path_and_delete_removes_imported_artifacts(tmp_
     assert store.list_cases() == []
     assert index.contains_chunks([])
     assert client.get(f"/api/imports/{import_id}").status_code == 404
+
+
+def test_same_content_can_be_imported_again_after_deletion(tmp_path):
+    client, store, index = _client(tmp_path)
+    upload = ("cases.csv", "symptom\nDC overvoltage\n", "text/csv")
+    first = client.post("/api/cases/import", files={"file": upload})
+    client.delete(f"/api/imports/{first.json()['import_id']}")
+
+    second = client.post("/api/cases/import", files={"file": upload})
+
+    assert second.status_code == 201
+    assert second.json()["import_id"] == first.json()["import_id"]
+    assert second.json()["reused"] is False
+    assert len(store.list_cases()) == 1
+    assert len(index.chunks) == 1
 
 
 def test_import_repair_endpoint_replays_interrupted_vector_write(tmp_path, monkeypatch):

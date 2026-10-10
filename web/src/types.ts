@@ -82,6 +82,27 @@ export interface CaseImportResult {
   document_ids: string[];
   chunk_count: number;
   imported_case_count: number;
+  import_id: string;
+  reused: boolean;
+}
+
+export type ImportStatus = "validated" | "indexing" | "complete" | "failed" | "needs_repair" | "deleting" | "deleted";
+
+export interface ImportSummary {
+  import_id: string;
+  document_id: string;
+  source_name: string;
+  file_type: string;
+  parser_version: string;
+  chunker_version: string;
+  expected_chunk_count: number;
+  indexed_chunks: number;
+  imported_cases: number;
+  status: ImportStatus;
+  created_at: string;
+  updated_at: string;
+  error_code: string | null;
+  synthetic_demo: boolean;
 }
 
 export interface FaultAnalysisInput {

@@ -229,6 +229,15 @@ class SQLiteStore:
             if row is not None:
                 if row["import_id"] != import_id:
                     raise ValueError("Import identity does not match its content and parser versions.")
+                if row["status"] == ImportStatus.DELETED.value:
+                    connection.execute(
+                        """UPDATE imports SET source_name = ?, source_path = ?, expected_chunk_count = ?,
+                        indexed_chunks = 0, imported_cases = 0, status = 'validated', error_code = NULL,
+                        case_candidates_ready = 0, updated_at = ? WHERE import_id = ?""",
+                        (source_name, source_path, expected_chunk_count, now, import_id),
+                    )
+                    row = connection.execute("SELECT * FROM imports WHERE import_id = ?", (import_id,)).fetchone()
+                    return self._import_from_row(row), False
                 return self._import_from_row(row), True
             connection.execute(
                 """INSERT INTO imports(
@@ -345,6 +354,13 @@ class SQLiteStore:
                 ).fetchall()
             }
         return candidates == linked
+
+    def import_is_synthetic(self, import_id: str) -> bool:
+        """Return whether any saved candidate carries the synthetic fixture marker."""
+        return any(
+            case.source_type == "synthetic_demo_fixture"
+            for case in self.get_import_case_candidates(import_id)
+        )
 
     def delete_import_case_data(self, import_id: str) -> None:
         """Delete cases and extracted candidate text owned by an import."""

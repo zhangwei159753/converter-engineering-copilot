@@ -158,6 +158,7 @@ class CaseRecord(BaseModel):
     validation_result: str | None = None
     handling_result: str | None = None
     evidence_ids: list[str] = Field(default_factory=list)
+    source_type: str | None = None
 
 
 class ImportStatus(str, Enum):
