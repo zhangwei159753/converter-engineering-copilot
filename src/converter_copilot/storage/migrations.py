@@ -1,0 +1,101 @@
+"""Versioned, transactional SQLite schema migrations."""
+
+import sqlite3
+from collections.abc import Callable
+
+Migration = Callable[[sqlite3.Connection], None]
+CURRENT_SCHEMA_VERSION = 2
+
+
+def _create_base_schema(connection: sqlite3.Connection) -> None:
+    statements = (
+        """CREATE TABLE IF NOT EXISTS tasks (
+            task_id TEXT PRIMARY KEY,
+            mode TEXT NOT NULL,
+            status TEXT NOT NULL,
+            inputs_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )""",
+        """CREATE TABLE IF NOT EXISTS task_events (
+            event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id TEXT NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE,
+            stage TEXT NOT NULL,
+            status TEXT NOT NULL,
+            message TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_task_events_task_event ON task_events(task_id, event_id)",
+        """CREATE TABLE IF NOT EXISTS reports (
+            task_id TEXT PRIMARY KEY REFERENCES tasks(task_id) ON DELETE CASCADE,
+            payload_json TEXT NOT NULL
+        )""",
+        "CREATE TABLE IF NOT EXISTS cases (case_id TEXT PRIMARY KEY, payload_json TEXT NOT NULL)",
+        """CREATE TABLE IF NOT EXISTS task_retries (
+            retry_task_id TEXT PRIMARY KEY REFERENCES tasks(task_id) ON DELETE CASCADE,
+            original_task_id TEXT NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE,
+            created_at TEXT NOT NULL
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_task_retries_original ON task_retries(original_task_id)",
+    )
+    for statement in statements:
+        connection.execute(statement)
+
+
+def _add_task_lifecycle_columns(connection: sqlite3.Connection) -> None:
+    task_columns = {row[1] for row in connection.execute("PRAGMA table_info(tasks)")}
+    additions = (
+        ("idempotency_key", "TEXT"),
+        ("request_hash", "TEXT"),
+        ("attempt", "INTEGER NOT NULL DEFAULT 0"),
+        ("max_attempts", "INTEGER NOT NULL DEFAULT 3"),
+        ("lease_owner", "TEXT"),
+        ("lease_expires_at", "TEXT"),
+        ("error_code", "TEXT"),
+    )
+    for name, declaration in additions:
+        if name not in task_columns:
+            connection.execute(f"ALTER TABLE tasks ADD COLUMN {name} {declaration}")
+
+    retry_columns = {row[1] for row in connection.execute("PRAGMA table_info(task_retries)")}
+    if "idempotency_key" not in retry_columns:
+        connection.execute("ALTER TABLE task_retries ADD COLUMN idempotency_key TEXT")
+    connection.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_idempotency_key "
+        "ON tasks(idempotency_key) WHERE idempotency_key IS NOT NULL"
+    )
+    connection.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_task_retries_idempotency_key "
+        "ON task_retries(idempotency_key) WHERE idempotency_key IS NOT NULL"
+    )
+
+
+MIGRATIONS: list[tuple[int, Migration]] = [
+    (1, _create_base_schema),
+    (2, _add_task_lifecycle_columns),
+]
+
+
+def migrate(connection: sqlite3.Connection) -> int:
+    """Apply each pending migration in an immediate transaction."""
+    current_version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+    known_versions = [version for version, _ in MIGRATIONS]
+    latest_version = max(known_versions, default=0)
+    if current_version > latest_version:
+        raise RuntimeError(
+            f"Database schema version {current_version} is newer than supported version {latest_version}."
+        )
+
+    for version, migration in MIGRATIONS:
+        if version <= current_version:
+            continue
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            migration(connection)
+            connection.execute(f"PRAGMA user_version = {version}")
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        current_version = version
+    return current_version

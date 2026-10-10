@@ -14,6 +14,7 @@ from converter_copilot.domain.schemas import (
     TaskMode,
     TaskRecord,
 )
+from converter_copilot.storage.migrations import CURRENT_SCHEMA_VERSION, migrate
 
 
 def _now() -> datetime:
@@ -23,58 +24,51 @@ def _now() -> datetime:
 class SQLiteStore:
     """Small synchronous SQLite repository used by the local single-user app."""
 
-    def __init__(self, database_path: str | Path):
+    def __init__(
+        self,
+        database_path: str | Path,
+        *,
+        initialize: bool = True,
+        backup_directory: str | Path | None = None,
+    ):
+        """Open the local database and optionally apply pending migrations."""
         self.database_path = Path(database_path)
+        self.backup_directory = Path(backup_directory) if backup_directory else self.database_path.parent / "backups"
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
-        self._initialize()
+        if initialize:
+            self.initialize()
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.database_path, timeout=30)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
+        connection.execute("PRAGMA busy_timeout = 30000")
         return connection
 
-    def _initialize(self) -> None:
+    def initialize(self) -> int:
+        """Back up an existing schema and apply pending migrations."""
+        existed = self.database_path.is_file() and self.database_path.stat().st_size > 0
         with self._connect() as connection:
-            connection.executescript(
-                """
-                CREATE TABLE IF NOT EXISTS tasks (
-                    task_id TEXT PRIMARY KEY,
-                    mode TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    inputs_json TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS task_events (
-                    event_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    task_id TEXT NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE,
-                    stage TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    message TEXT NOT NULL,
-                    created_at TEXT NOT NULL
-                );
-                CREATE INDEX IF NOT EXISTS idx_task_events_task_event
-                    ON task_events(task_id, event_id);
-                CREATE TABLE IF NOT EXISTS reports (
-                    task_id TEXT PRIMARY KEY REFERENCES tasks(task_id) ON DELETE CASCADE,
-                    payload_json TEXT NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS cases (
-                    case_id TEXT PRIMARY KEY,
-                    payload_json TEXT NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS task_retries (
-                    retry_task_id TEXT PRIMARY KEY REFERENCES tasks(task_id) ON DELETE CASCADE,
-                    original_task_id TEXT NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE,
-                    created_at TEXT NOT NULL
-                );
-                CREATE INDEX IF NOT EXISTS idx_task_retries_original
-                    ON task_retries(original_task_id);
-                """
-            )
+            current_version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+            has_user_tables = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' LIMIT 1"
+            ).fetchone() is not None
+            if existed and has_user_tables and current_version < CURRENT_SCHEMA_VERSION:
+                self._backup_before_migration()
+            connection.execute("PRAGMA journal_mode = WAL")
+            return migrate(connection)
+
+    def _backup_before_migration(self) -> Path:
+        """Create a consistent SQLite backup before changing an existing schema."""
+        self.backup_directory.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        backup_path = self.backup_directory / f"{self.database_path.stem}-before-v{CURRENT_SCHEMA_VERSION}-{stamp}.db"
+        with self._connect() as source, sqlite3.connect(backup_path) as destination:
+            source.backup(destination)
+        return backup_path
 
     def create_task(self, request: TaskCreate) -> TaskRecord:
+        """Persist a task with an initial queued status."""
         now = _now()
         record = TaskRecord(
             task_id=str(uuid4()),
@@ -86,7 +80,8 @@ class SQLiteStore:
         )
         with self._connect() as connection:
             connection.execute(
-                "INSERT INTO tasks VALUES (?, ?, ?, ?, ?, ?)",
+                """INSERT INTO tasks(task_id, mode, status, inputs_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)""",
                 (
                     record.task_id,
                     record.mode.value,
@@ -99,11 +94,13 @@ class SQLiteStore:
         return record
 
     def get_task(self, task_id: str) -> TaskRecord | None:
+        """Return one persisted task, if it exists."""
         with self._connect() as connection:
             row = connection.execute("SELECT * FROM tasks WHERE task_id = ?", (task_id,)).fetchone()
         return self._task_from_row(row) if row else None
 
     def list_tasks(self, limit: int = 100) -> list[TaskRecord]:
+        """List the newest tasks up to the requested limit."""
         with self._connect() as connection:
             rows = connection.execute(
                 "SELECT * FROM tasks ORDER BY created_at DESC, task_id LIMIT ?", (limit,)
@@ -140,6 +137,7 @@ class SQLiteStore:
         return int(row["count"])
 
     def append_event(self, task_id: str, *, stage: str, status: str, message: str) -> TaskEvent:
+        """Append one progress event and return its monotonic event ID."""
         created_at = _now()
         with self._connect() as connection:
             cursor = connection.execute(
@@ -157,6 +155,7 @@ class SQLiteStore:
         )
 
     def events_after(self, task_id: str, after_id: int = 0) -> list[TaskEvent]:
+        """Return events for a task whose IDs follow the supplied cursor."""
         with self._connect() as connection:
             rows = connection.execute(
                 "SELECT * FROM task_events WHERE task_id = ? AND event_id > ? ORDER BY event_id",
@@ -165,6 +164,7 @@ class SQLiteStore:
         return [TaskEvent.model_validate(dict(row)) for row in rows]
 
     def save_report(self, report: ConverterReport) -> None:
+        """Insert or replace the report associated with one task."""
         with self._connect() as connection:
             connection.execute(
                 "INSERT INTO reports(task_id, payload_json) VALUES (?, ?) "
@@ -173,11 +173,13 @@ class SQLiteStore:
             )
 
     def get_report(self, task_id: str) -> ConverterReport | None:
+        """Return the typed report for a task, if it is available."""
         with self._connect() as connection:
             row = connection.execute("SELECT payload_json FROM reports WHERE task_id = ?", (task_id,)).fetchone()
         return ConverterReport.model_validate_json(row["payload_json"]) if row else None
 
     def save_case(self, case: CaseRecord) -> None:
+        """Insert or replace one curated maintenance case."""
         with self._connect() as connection:
             connection.execute(
                 "INSERT INTO cases(case_id, payload_json) VALUES (?, ?) "
@@ -186,6 +188,7 @@ class SQLiteStore:
             )
 
     def list_cases(self) -> list[CaseRecord]:
+        """Return all curated cases in stable ID order."""
         with self._connect() as connection:
             rows = connection.execute("SELECT payload_json FROM cases ORDER BY case_id").fetchall()
         return [CaseRecord.model_validate_json(row["payload_json"]) for row in rows]
