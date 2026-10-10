@@ -4,16 +4,17 @@ import asyncio
 from collections.abc import Callable
 
 from converter_copilot.agent.workflows import WorkflowDeps, build_workflow
-from converter_copilot.domain.schemas import ConverterReport, TaskCreate, TaskMode, TaskRecord
+from converter_copilot.domain.schemas import (
+    ConverterReport,
+    TaskCreate,
+    TaskMode,
+    TaskRecord,
+)
 from converter_copilot.storage.sqlite_store import SQLiteStore
 
 
 class WorkflowUnavailableError(RuntimeError):
     """Raised when a valid mode has not yet been implemented."""
-
-
-class RetryLimitError(RuntimeError):
-    """Raised when a task has exhausted its bounded retry budget."""
 
 
 class TaskRunner:
@@ -27,6 +28,7 @@ class TaskRunner:
         store: SQLiteStore,
         deps_provider: Callable[[], WorkflowDeps] | None = None,
     ):
+        """Bind a durable task store to a workflow dependency provider."""
         self.store = store
         self.deps_provider = deps_provider or self._default_deps
         self._active: dict[str, asyncio.Task] = {}
@@ -37,45 +39,51 @@ class TaskRunner:
 
         return build_default_deps()
 
-    async def create(self, request: TaskCreate) -> TaskRecord:
+    async def create(
+        self, request: TaskCreate, *, idempotency_key: str | None = None
+    ) -> tuple[TaskRecord, bool]:
         """Validate availability, persist a queued task, then schedule one run."""
         if request.mode not in self._AVAILABLE_MODES:
             raise WorkflowUnavailableError(f"The {request.mode.value} workflow is not available yet.")
         deps = self.deps_provider()
         deps.case_store = self.store
         graph = build_workflow(request.mode, deps)
-        record = self.store.create_task(request)
-        self.store.append_event(record.task_id, stage="queued", status="queued", message="任务已排队。")
-        self._active[record.task_id] = asyncio.create_task(self._execute(record, graph))
-        return record
+        record, reused = self.store.create_task(request, idempotency_key=idempotency_key)
+        if not reused:
+            self._active[record.task_id] = asyncio.create_task(self._execute(record, graph))
+        return record, reused
 
-    async def retry(self, task_id: str) -> TaskRecord:
+    async def retry(self, task_id: str, *, idempotency_key: str | None = None) -> tuple[TaskRecord, bool]:
         """Create a new bounded attempt for a failed or partial task."""
         original = self.store.get_task(task_id)
         if original is None:
             raise KeyError(task_id)
         if original.status not in {"failed", "partial"}:
             raise ValueError("Only failed or partial tasks can be retried.")
-        if self.store.retry_count(task_id) >= self.MAX_RETRIES:
-            raise RetryLimitError(f"Task {task_id} has reached the retry limit.")
-        retry = await self.create(TaskCreate(mode=original.mode, inputs=original.inputs))
-        self.store.record_retry(task_id, retry.task_id)
-        self.store.append_event(retry.task_id, stage="retry", status="queued", message=f"重试任务，来源任务 {task_id}。")
-        return retry
+        request = TaskCreate(mode=original.mode, inputs=original.inputs)
+        if request.mode not in self._AVAILABLE_MODES:
+            raise WorkflowUnavailableError(f"The {request.mode.value} workflow is not available yet.")
+        deps = self.deps_provider()
+        deps.case_store = self.store
+        graph = build_workflow(request.mode, deps)
+        retry, reused = self.store.create_retry(
+            task_id, request, idempotency_key=idempotency_key, max_retries=self.MAX_RETRIES
+        )
+        if not reused:
+            self._active[retry.task_id] = asyncio.create_task(self._execute(retry, graph))
+        return retry, reused
 
     async def _execute(self, record: TaskRecord, graph) -> None:
         task_id = record.task_id
-        self.store.update_task_status(task_id, "running")
+        worker_id = "inline-runner"
+        self.store.update_task_status(task_id, "running", worker_id=worker_id)
         self.store.append_event(task_id, stage="workflow", status="running", message="工作流开始执行。")
         try:
             state = await graph.ainvoke({"task_id": task_id, "inputs": record.inputs})
             report: ConverterReport | None = state.get("report")
             if report is None:
                 raise RuntimeError("Workflow completed without a report.")
-            self.store.save_report(report)
-            self.store.update_task_status(task_id, report.completion_status)
-            message = "报告已生成。" if report.completion_status == "completed" else "已生成部分报告，请检查提示和证据。"
-            self.store.append_event(task_id, stage="complete", status=report.completion_status, message=message)
+            self.store.finish_task(task_id, report, worker_id=worker_id)
         except Exception as error:
             self.store.update_task_status(task_id, "failed")
             self.store.append_event(

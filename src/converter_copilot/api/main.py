@@ -24,7 +24,7 @@ def create_app(runner: TaskRunner | None = None) -> FastAPI:
         allow_origins=[origin],
         allow_credentials=False,
         allow_methods=["GET", "POST"],
-        allow_headers=["Content-Type", "Last-Event-ID"],
+        allow_headers=["Content-Type", "Last-Event-ID", "Idempotency-Key"],
     )
     app.include_router(build_task_router(runner))
     app.include_router(build_case_router(runner))
