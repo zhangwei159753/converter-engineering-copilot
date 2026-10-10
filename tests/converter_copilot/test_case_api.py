@@ -48,6 +48,19 @@ def test_csv_case_import_indexes_chunks_and_persists_cases(tmp_path):
     assert len(store.list_cases()) == 1
 
 
+def test_identical_csv_upload_reuses_import_case_and_vector_identity(tmp_path):
+    client, store, index = _client(tmp_path)
+    upload = ("cases.csv", "symptom,equipment_type\nDC overvoltage,PV inverter\n", "text/csv")
+
+    first = client.post("/api/cases/import", files={"file": upload})
+    second = client.post("/api/cases/import", files={"file": upload})
+
+    assert first.status_code == second.status_code == 201
+    assert first.json()["document_ids"] == second.json()["document_ids"]
+    assert len(index.added) == 1
+    assert len(store.list_cases()) == 1
+
+
 def test_case_import_rejects_unsupported_extension(tmp_path):
     client, _, _ = _client(tmp_path)
     response = client.post("/api/cases/import", files={"file": ("cases.xlsx", b"not supported")})

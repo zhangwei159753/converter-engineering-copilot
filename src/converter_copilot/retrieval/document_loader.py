@@ -3,6 +3,7 @@
 import csv
 import hashlib
 import io
+import unicodedata
 from pathlib import Path
 
 import fitz
@@ -14,7 +15,14 @@ class DocumentLoadError(ValueError):
     """Raised when a source file is unsupported, empty, or malformed."""
 
 
-def load_document(path: Path, task_id: str) -> list[DocumentChunk]:
+def load_document(
+    path: Path,
+    task_id: str,
+    *,
+    document_id: str | None = None,
+    parser_version: str | None = None,
+    chunker_version: str | None = None,
+) -> list[DocumentChunk]:
     """Extract one or more source-located chunks from a supported local file."""
     path = Path(path)
     if not path.is_file():
@@ -25,7 +33,7 @@ def load_document(path: Path, task_id: str) -> list[DocumentChunk]:
     raw = path.read_bytes()
     if not raw.strip():
         raise DocumentLoadError(f"Document is empty: {path.name}")
-    document_id = hashlib.sha256(str(path.resolve()).encode("utf-8") + raw).hexdigest()[:24]
+    document_id = document_id or hashlib.sha256(str(path.resolve()).encode("utf-8") + raw).hexdigest()[:24]
 
     try:
         if extension == ".pdf":
@@ -43,12 +51,23 @@ def load_document(path: Path, task_id: str) -> list[DocumentChunk]:
         raise DocumentLoadError(f"No extractable text found in {path.name}")
     return [
         DocumentChunk(
-            chunk_id=f"{document_id}-{index:04d}",
+            chunk_id=(
+                hashlib.sha256(
+                    f"{document_id}\x1f{locator}\x1f{unicodedata.normalize('NFKC', ' '.join(text.split()))}".encode()
+                ).hexdigest()[:32]
+                if parser_version is not None or chunker_version is not None
+                else f"{document_id}-{index:04d}"
+            ),
             document_id=document_id,
             filename=path.name,
             text=text,
             locator=locator,
-            metadata={"task_id": task_id, **metadata},
+            metadata={
+                "task_id": task_id,
+                **({"parser_version": parser_version} if parser_version else {}),
+                **({"chunker_version": chunker_version} if chunker_version else {}),
+                **metadata,
+            },
         )
         for index, (text, locator, metadata) in enumerate(parts, start=1)
     ]

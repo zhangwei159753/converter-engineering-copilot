@@ -10,6 +10,9 @@ from uuid import uuid4
 from converter_copilot.domain.schemas import (
     CaseRecord,
     ConverterReport,
+    DocumentChunk,
+    ImportRecord,
+    ImportStatus,
     TaskCreate,
     TaskEvent,
     TaskMode,
@@ -199,6 +202,131 @@ class SQLiteStore:
             connection.rollback()
         finally:
             connection.close()
+
+    def create_import(
+        self,
+        import_id: str,
+        *,
+        content_sha256: str,
+        source_name: str,
+        file_type: str,
+        parser_version: str,
+        chunker_version: str,
+        expected_chunk_count: int,
+        source_path: str,
+    ) -> tuple[ImportRecord, bool]:
+        """Create or return the ledger row for the same content and parser versions."""
+        if expected_chunk_count < 0:
+            raise ValueError("Expected chunk count cannot be negative.")
+        now = _now().isoformat()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """SELECT * FROM imports WHERE content_sha256 = ? AND file_type = ?
+                AND parser_version = ? AND chunker_version = ?""",
+                (content_sha256, file_type, parser_version, chunker_version),
+            ).fetchone()
+            if row is not None:
+                if row["import_id"] != import_id:
+                    raise ValueError("Import identity does not match its content and parser versions.")
+                return self._import_from_row(row), True
+            connection.execute(
+                """INSERT INTO imports(
+                    import_id, content_sha256, source_name, file_type, source_path,
+                    parser_version, chunker_version, expected_chunk_count, status,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'validated', ?, ?)""",
+                (
+                    import_id, content_sha256, source_name, file_type, source_path,
+                    parser_version, chunker_version, expected_chunk_count, now, now,
+                ),
+            )
+            row = connection.execute("SELECT * FROM imports WHERE import_id = ?", (import_id,)).fetchone()
+        return self._import_from_row(row), False
+
+    def get_import(self, import_id: str) -> ImportRecord | None:
+        """Return one private import-ledger record, if it exists."""
+        with self._connect() as connection:
+            row = connection.execute("SELECT * FROM imports WHERE import_id = ?", (import_id,)).fetchone()
+        return self._import_from_row(row) if row else None
+
+    def update_import_status(
+        self,
+        import_id: str,
+        status: ImportStatus,
+        *,
+        indexed_chunks: int,
+        imported_cases: int,
+        error_code: str | None = None,
+    ) -> ImportRecord:
+        """Persist import progress using safe counts and a stable error code."""
+        if indexed_chunks < 0 or imported_cases < 0:
+            raise ValueError("Import counts cannot be negative.")
+        now = _now().isoformat()
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """UPDATE imports SET status = ?, indexed_chunks = ?, imported_cases = ?,
+                error_code = ?, updated_at = ? WHERE import_id = ?""",
+                (status.value, indexed_chunks, imported_cases, error_code, now, import_id),
+            )
+            if cursor.rowcount != 1:
+                raise KeyError(import_id)
+        record = self.get_import(import_id)
+        assert record is not None
+        return record
+
+    def save_import_chunks(self, import_id: str, chunks: list[DocumentChunk]) -> None:
+        """Record deterministic expected chunk IDs before external vector writes."""
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            if connection.execute("SELECT 1 FROM imports WHERE import_id = ?", (import_id,)).fetchone() is None:
+                raise KeyError(import_id)
+            connection.executemany(
+                """INSERT OR IGNORE INTO import_chunks(import_id, chunk_id, document_id, locator)
+                VALUES (?, ?, ?, ?)""",
+                [(import_id, chunk.chunk_id, chunk.document_id, chunk.locator) for chunk in chunks],
+            )
+
+    def save_import_case_candidates(self, import_id: str, candidates: list[CaseRecord]) -> None:
+        """Persist candidate extraction once so recovery does not rerun an LLM."""
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            if connection.execute("SELECT 1 FROM imports WHERE import_id = ?", (import_id,)).fetchone() is None:
+                raise KeyError(import_id)
+            connection.executemany(
+                """INSERT OR IGNORE INTO import_case_candidates(import_id, case_id, payload_json)
+                VALUES (?, ?, ?)""",
+                [(import_id, case.case_id, case.model_dump_json()) for case in candidates],
+            )
+
+    def get_import_case_candidates(self, import_id: str) -> list[CaseRecord]:
+        """Return saved case-extraction candidates in deterministic order."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT payload_json FROM import_case_candidates WHERE import_id = ? ORDER BY case_id",
+                (import_id,),
+            ).fetchall()
+        return [CaseRecord.model_validate_json(row["payload_json"]) for row in rows]
+
+    def promote_import_case_candidates(self, import_id: str) -> int:
+        """Idempotently upsert saved candidates and link their cases to an import."""
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            rows = connection.execute(
+                "SELECT case_id, payload_json FROM import_case_candidates WHERE import_id = ?",
+                (import_id,),
+            ).fetchall()
+            for row in rows:
+                connection.execute(
+                    """INSERT INTO cases(case_id, payload_json) VALUES (?, ?)
+                    ON CONFLICT(case_id) DO UPDATE SET payload_json = excluded.payload_json""",
+                    (row["case_id"], row["payload_json"]),
+                )
+                connection.execute(
+                    "INSERT OR IGNORE INTO import_cases(import_id, case_id) VALUES (?, ?)",
+                    (import_id, row["case_id"]),
+                )
+        return len(rows)
 
     def update_task_status(
         self, task_id: str, status: str, *, worker_id: str | None = None
@@ -455,6 +583,27 @@ class SQLiteStore:
         with self._connect() as connection:
             rows = connection.execute("SELECT payload_json FROM cases ORDER BY case_id").fetchall()
         return [CaseRecord.model_validate_json(row["payload_json"]) for row in rows]
+
+    @staticmethod
+    def _import_from_row(row: sqlite3.Row) -> ImportRecord:
+        """Build the typed import record without exposing it as an API model."""
+        return ImportRecord(
+            import_id=row["import_id"],
+            document_id=row["import_id"],
+            content_sha256=row["content_sha256"],
+            source_name=row["source_name"],
+            file_type=row["file_type"],
+            source_path=row["source_path"],
+            parser_version=row["parser_version"],
+            chunker_version=row["chunker_version"],
+            expected_chunk_count=row["expected_chunk_count"],
+            indexed_chunks=row["indexed_chunks"],
+            imported_cases=row["imported_cases"],
+            status=ImportStatus(row["status"]),
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+            error_code=row["error_code"],
+        )
 
     @staticmethod
     def _task_from_row(row: sqlite3.Row) -> TaskRecord:

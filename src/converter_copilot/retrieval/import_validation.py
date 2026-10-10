@@ -3,9 +3,11 @@
 import csv
 import hashlib
 import io
+import os
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from uuid import uuid4
 
 import fitz
 
@@ -27,6 +29,15 @@ class ValidatedImport:
     case_rows: list[dict[str, str]]
     payload: bytes
 
+    @property
+    def import_id(self) -> str:
+        """Return the deterministic identity for content and parser versions."""
+        identity = (
+            f"converter-import-v1:{self.file_type}:{self.parser_version}:"
+            f"{self.chunker_version}:{self.content_sha256}"
+        )
+        return hashlib.sha256(identity.encode("utf-8")).hexdigest()[:32]
+
 
 class ImportValidationError(ValueError):
     """Stable, safe validation failure suitable for an API response."""
@@ -38,7 +49,14 @@ class ImportValidationError(ValueError):
         self.detail = {"code": code, "message": message, "filename": filename, "row": row}
 
 
-def validate_upload(filename: str, payload: bytes, limits: ImportLimits) -> ValidatedImport:
+def validate_upload(
+    filename: str,
+    payload: bytes,
+    limits: ImportLimits,
+    *,
+    parser_version: str | None = None,
+    chunker_version: str = "locator-chunk-v1",
+) -> ValidatedImport:
     """Parse the complete bounded payload and enforce format-specific ceilings."""
     safe_name = Path(filename.replace("\\", "/")).name or "upload"
     suffix = Path(safe_name).suffix.lower()
@@ -80,11 +98,21 @@ def validate_upload(filename: str, payload: bytes, limits: ImportLimits) -> Vali
         finally:
             document.close()
 
+    parser_version = parser_version or {"pdf": "pdf-v1", "md": "markdown-v1", "csv": "csv-v1"}[file_type]
+    content_sha256 = hashlib.sha256(payload).hexdigest()
+    identity = f"converter-import-v1:{file_type}:{parser_version}:{chunker_version}:{content_sha256}"
+    import_id = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:32]
     try:
         with tempfile.TemporaryDirectory(prefix="converter-validate-") as directory:
             path = Path(directory) / safe_name
             path.write_bytes(payload)
-            chunks = load_document(path, task_id="case-import")
+            chunks = load_document(
+                path,
+                task_id="case-import",
+                document_id=import_id,
+                parser_version=parser_version,
+                chunker_version=chunker_version,
+            )
     except DocumentLoadError as error:
         # The loader may include file content or filesystem paths in diagnostics.
         code = "invalid_csv" if suffix == ".csv" else "invalid_document"
@@ -99,17 +127,34 @@ def validate_upload(filename: str, payload: bytes, limits: ImportLimits) -> Vali
             status_code=413,
         )
 
-    version = {"pdf": "pdf-v1", "md": "markdown-v1", "csv": "csv-v1"}[file_type]
     return ValidatedImport(
         filename=safe_name,
         file_type=file_type,
-        content_sha256=hashlib.sha256(payload).hexdigest(),
-        parser_version=version,
-        chunker_version="locator-chunk-v1",
+        content_sha256=content_sha256,
+        parser_version=parser_version,
+        chunker_version=chunker_version,
         chunks=chunks,
         case_rows=case_rows,
         payload=payload,
     )
+
+
+def retain_source(source: ValidatedImport, directory: str | Path) -> Path:
+    """Atomically retain validated original bytes under their stable identity."""
+    source_directory = Path(directory)
+    source_directory.mkdir(parents=True, exist_ok=True)
+    destination = source_directory / f"{source.import_id}.{source.file_type}"
+    if destination.exists():
+        if hashlib.sha256(destination.read_bytes()).hexdigest() != source.content_sha256:
+            raise OSError("Existing retained source does not match its import identity.")
+        return destination
+    temporary = destination.with_name(f"{destination.name}.tmp-{uuid4().hex}")
+    try:
+        temporary.write_bytes(source.payload)
+        os.replace(temporary, destination)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return destination
 
 
 def _validate_csv(filename: str, payload: bytes, limits: ImportLimits) -> list[dict[str, str]]:

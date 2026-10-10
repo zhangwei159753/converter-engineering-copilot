@@ -69,8 +69,51 @@ def test_empty_database_migrates_to_current_version(tmp_path):
         version = connection.execute("PRAGMA user_version").fetchone()[0]
         columns = {row[1] for row in connection.execute("PRAGMA table_info(tasks)")}
 
-    assert version == 2
+    assert version == 3
     assert {"task_id", "mode", "status", "inputs_json", "created_at", "updated_at"} <= columns
+    with sqlite3.connect(database) as connection:
+        assert connection.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'imports'").fetchone()
+
+
+def test_import_ledger_preserves_identity_and_candidates(tmp_path):
+    from converter_copilot.domain.schemas import ImportStatus
+
+    store = SQLiteStore(tmp_path / "imports.db")
+    args = {
+        "content_sha256": "a" * 64,
+        "source_name": "manual.md",
+        "file_type": "md",
+        "parser_version": "markdown-v1",
+        "chunker_version": "locator-chunk-v1",
+        "expected_chunk_count": 2,
+        "source_path": str(tmp_path / "sources" / "import-a.md"),
+    }
+    first, reused_first = store.create_import("import-a", **args)
+    second, reused_second = store.create_import("import-a", **args)
+    case = CaseRecord(case_id="case-stable", symptom="母线过压", evidence_ids=["chunk-a"])
+
+    store.save_import_case_candidates("import-a", [case])
+    updated = store.update_import_status("import-a", ImportStatus.INDEXING, indexed_chunks=1, imported_cases=0)
+    candidates = store.get_import_case_candidates("import-a")
+
+    assert reused_first is False
+    assert reused_second is True
+    assert first.import_id == second.import_id == "import-a"
+    assert updated.status == ImportStatus.INDEXING
+    assert updated.indexed_chunks == 1
+    assert candidates == [case]
+
+
+def test_import_migration_preserves_existing_case_payload(tmp_path):
+    database = tmp_path / "legacy-case.db"
+    original = CaseRecord(case_id="legacy-1", symptom="旧案例", evidence_ids=["old-evidence"])
+    with sqlite3.connect(database) as connection:
+        connection.execute("CREATE TABLE cases (case_id TEXT PRIMARY KEY, payload_json TEXT NOT NULL)")
+        connection.execute("INSERT INTO cases VALUES (?, ?)", (original.case_id, original.model_dump_json()))
+
+    store = SQLiteStore(database)
+
+    assert store.list_cases() == [original]
 
 
 def test_existing_v0_rows_survive_migration(tmp_path):

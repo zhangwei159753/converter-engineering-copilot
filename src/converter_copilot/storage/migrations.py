@@ -4,7 +4,7 @@ import sqlite3
 from collections.abc import Callable
 
 Migration = Callable[[sqlite3.Connection], None]
-CURRENT_SCHEMA_VERSION = 2
+CURRENT_SCHEMA_VERSION = 3
 
 
 def _create_base_schema(connection: sqlite3.Connection) -> None:
@@ -70,9 +70,57 @@ def _add_task_lifecycle_columns(connection: sqlite3.Connection) -> None:
     )
 
 
+def _add_import_ledger(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """CREATE TABLE imports (
+            import_id TEXT PRIMARY KEY,
+            content_sha256 TEXT NOT NULL,
+            source_name TEXT NOT NULL,
+            file_type TEXT NOT NULL,
+            source_path TEXT NOT NULL,
+            parser_version TEXT NOT NULL,
+            chunker_version TEXT NOT NULL,
+            expected_chunk_count INTEGER NOT NULL,
+            indexed_chunks INTEGER NOT NULL DEFAULT 0,
+            imported_cases INTEGER NOT NULL DEFAULT 0,
+            status TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            error_code TEXT,
+            UNIQUE(content_sha256, file_type, parser_version, chunker_version)
+        )"""
+    )
+    connection.execute(
+        """CREATE TABLE import_chunks (
+            import_id TEXT NOT NULL REFERENCES imports(import_id) ON DELETE CASCADE,
+            chunk_id TEXT NOT NULL,
+            document_id TEXT NOT NULL,
+            locator TEXT NOT NULL,
+            PRIMARY KEY(import_id, chunk_id)
+        )"""
+    )
+    connection.execute(
+        """CREATE TABLE import_case_candidates (
+            import_id TEXT NOT NULL REFERENCES imports(import_id) ON DELETE CASCADE,
+            case_id TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            PRIMARY KEY(import_id, case_id)
+        )"""
+    )
+    connection.execute(
+        """CREATE TABLE import_cases (
+            import_id TEXT NOT NULL REFERENCES imports(import_id) ON DELETE CASCADE,
+            case_id TEXT NOT NULL REFERENCES cases(case_id) ON DELETE CASCADE,
+            PRIMARY KEY(import_id, case_id)
+        )"""
+    )
+    connection.execute("CREATE INDEX idx_imports_status_created ON imports(status, created_at)")
+
+
 MIGRATIONS: list[tuple[int, Migration]] = [
     (1, _create_base_schema),
     (2, _add_task_lifecycle_columns),
+    (3, _add_import_ledger),
 ]
 
 

@@ -160,6 +160,38 @@ class CaseRecord(BaseModel):
     evidence_ids: list[str] = Field(default_factory=list)
 
 
+class ImportStatus(str, Enum):
+    """Durable lifecycle state for one validated source import."""
+
+    VALIDATED = "validated"
+    INDEXING = "indexing"
+    COMPLETE = "complete"
+    FAILED = "failed"
+    NEEDS_REPAIR = "needs_repair"
+    DELETING = "deleting"
+    DELETED = "deleted"
+
+
+class ImportRecord(BaseModel):
+    """Private import ledger record; source_path must not be returned by APIs."""
+
+    import_id: str
+    document_id: str
+    content_sha256: str
+    source_name: str
+    file_type: str
+    source_path: str
+    parser_version: str
+    chunker_version: str
+    expected_chunk_count: int
+    indexed_chunks: int = 0
+    imported_cases: int = 0
+    status: ImportStatus
+    created_at: datetime
+    updated_at: datetime
+    error_code: str | None = None
+
+
 _INPUT_MODELS = {
     TaskMode.FAULT_ANALYSIS: FaultAnalysisInput,
     TaskMode.TECHNICAL_RESEARCH: TechnicalResearchInput,

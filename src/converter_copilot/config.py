@@ -2,6 +2,7 @@
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -102,6 +103,12 @@ class ImportLimits:
             max_csv_rows=int(os.getenv("IMPORT_MAX_CSV_ROWS", "10000")),
             max_chunks=int(os.getenv("IMPORT_MAX_CHUNKS", "2000")),
         )
+
+
+def import_source_directory(default: str | Path | None = None) -> Path:
+    """Return the local directory used to retain validated original uploads."""
+    load_dotenv()
+    return Path(os.getenv("CONVERTER_SOURCE_DIR", str(default or ".data/sources")))
 
 
 def tracing_run_config(*, task_id: str, mode: str) -> dict:

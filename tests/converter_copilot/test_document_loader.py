@@ -7,6 +7,7 @@ from converter_copilot.config import ImportLimits
 from converter_copilot.retrieval.document_loader import DocumentLoadError, load_document
 from converter_copilot.retrieval.import_validation import (
     ImportValidationError,
+    retain_source,
     validate_upload,
 )
 
@@ -72,3 +73,23 @@ def test_invalid_utf8_upload_returns_safe_validation_error():
 
     assert error.value.detail["code"] == "invalid_utf8"
     assert "private document text" not in str(error.value)
+
+
+def test_import_and_chunk_ids_are_stable_for_content_and_parser_versions(tmp_path):
+    payload = b"# Manual\n\nCheck the DC bus voltage.\n"
+    first = validate_upload("manual.md", payload, ImportLimits())
+    second = validate_upload("renamed.md", payload, ImportLimits())
+    changed_parser = validate_upload("manual.md", payload, ImportLimits(), parser_version="markdown-v2")
+
+    assert first.import_id == second.import_id
+    assert changed_parser.import_id != first.import_id
+    assert first.chunks[0].document_id == first.import_id
+    assert first.chunks[0].chunk_id == second.chunks[0].chunk_id
+
+
+def test_retained_source_survives_validation_temp_directory(tmp_path):
+    source = validate_upload("notes.md", b"# Manual\n\nOriginal bytes.\n", ImportLimits())
+    destination = retain_source(source, tmp_path / "sources")
+
+    assert destination.read_bytes() == source.payload
+    assert destination.parent == tmp_path / "sources"
