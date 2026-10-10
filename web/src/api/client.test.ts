@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createTask, deleteImport, importCases, listImports, repairImport, retryTask } from "./client";
+import { createTask, deleteImport, getAgentRuns, getHypothesisBranches, importCases, listImports, repairImport, retryTask } from "./client";
 
 describe("task API idempotency", () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -46,5 +46,22 @@ describe("source import API", () => {
     }));
 
     await expect(importCases(new File(["symptom"], "cases.csv"))).rejects.toThrow("CSV row 2 is missing symptom.");
+  });
+});
+
+describe("agent collaboration read APIs", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("loads task-scoped traces and branch snapshots with encoded IDs", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ task_id: "task", items: [] }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getAgentRuns("task / 1");
+    await getHypothesisBranches("task / 1");
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "/api/tasks/task%20%2F%201/agents",
+      "/api/tasks/task%20%2F%201/hypotheses",
+    ]);
   });
 });

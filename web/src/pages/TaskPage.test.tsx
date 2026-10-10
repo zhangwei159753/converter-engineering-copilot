@@ -4,7 +4,10 @@ import { describe, expect, it, vi } from "vitest";
 import TaskPage from "./TaskPage";
 import * as api from "../api/client";
 
-vi.mock("../api/client", () => ({ getTask: vi.fn(), retryTask: vi.fn(), streamTaskEvents: vi.fn() }));
+vi.mock("../api/client", () => ({
+  getAgentRuns: vi.fn().mockResolvedValue({ task_id: "task-1", items: [] }),
+  getTask: vi.fn(), retryTask: vi.fn(), streamTaskEvents: vi.fn(),
+}));
 
 describe("TaskPage", () => {
   it("shows progress stages and report-ready navigation", async () => {
@@ -50,5 +53,31 @@ describe("TaskPage", () => {
     expect(screen.getByText("检测到执行租约过期，任务已重新排队。")).toBeInTheDocument();
     expect(screen.getByText("任务连续恢复次数已达上限，请检查本地服务日志后手动重试。")).toBeInTheDocument();
     expect(screen.queryByText(/worker-|secret/i)).not.toBeInTheDocument();
+  });
+
+  it("refreshes the visible agent timeline when an agent event arrives", async () => {
+    vi.mocked(api.getAgentRuns).mockClear();
+    vi.mocked(api.getTask).mockResolvedValue({
+      task_id: "task-1", mode: "fault_analysis", status: "running", inputs: {},
+      created_at: "2026-10-10T00:00:00Z", updated_at: "2026-10-10T00:01:00Z",
+      attempt: 1, max_attempts: 3, lease_expires_at: null, error_code: null,
+    });
+    vi.mocked(api.getAgentRuns).mockResolvedValue({
+      task_id: "task-1",
+      items: [{
+        agent_run_id: "run-1", task_id: "task-1", role: "evidence_researcher", stage: "research",
+        status: "running", parent_run_id: null, branch_id: null, input_refs: [], output_refs: [],
+        summary: "并发检索公开来源和本地资料。", error_code: null, retry_count: 0,
+        started_at: "2026-10-10T00:01:00Z", completed_at: null,
+      }],
+    });
+    vi.mocked(api.streamTaskEvents).mockImplementation(async (_id, onEvent) => {
+      onEvent({ event_id: 1, task_id: "task-1", stage: "agent:evidence_researcher", status: "running", message: "检索中", created_at: "2026-10-10T00:01:00Z" });
+    });
+
+    render(<MemoryRouter initialEntries={["/tasks/task-1"]}><Routes><Route path="/tasks/:taskId" element={<TaskPage />} /></Routes></MemoryRouter>);
+
+    expect(await screen.findByText("并发检索公开来源和本地资料。")).toBeInTheDocument();
+    expect(api.getAgentRuns).toHaveBeenCalledTimes(2);
   });
 });

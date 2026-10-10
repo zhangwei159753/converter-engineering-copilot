@@ -1,4 +1,4 @@
-import type { CaseImportResult, ConverterReport, EvaluationExample, EvaluationReviewEvent, EvaluationSummary, ImportSummary, TaskAccepted, TaskEvent, TaskRecord, WorkOrder, WorkOrderDetail, WorkOrderReview } from "../types";
+import type { AgentRun, CaseImportResult, ConverterReport, EvaluationExample, EvaluationReviewEvent, EvaluationSummary, HypothesisBranch, ImportSummary, TaskAccepted, TaskEvent, TaskRecord, WorkOrder, WorkOrderDetail, WorkOrderReview } from "../types";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -51,6 +51,14 @@ export function retryTask(taskId: string): Promise<TaskAccepted> {
 
 export function getReport(taskId: string): Promise<ConverterReport> {
   return request<ConverterReport>(`/api/tasks/${encodeURIComponent(taskId)}/report`);
+}
+
+export function getAgentRuns(taskId: string): Promise<{ task_id: string; items: AgentRun[] }> {
+  return request(`/api/tasks/${encodeURIComponent(taskId)}/agents`);
+}
+
+export function getHypothesisBranches(taskId: string): Promise<{ task_id: string; items: HypothesisBranch[] }> {
+  return request(`/api/tasks/${encodeURIComponent(taskId)}/hypotheses`);
 }
 
 export function importCases(file: File): Promise<CaseImportResult> {

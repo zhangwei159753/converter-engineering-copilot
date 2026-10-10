@@ -24,6 +24,42 @@ export interface TaskEvent {
   created_at: string;
 }
 
+export type AgentRole = "coordinator" | "evidence_researcher" | "hypothesis_analyst" | "evidence_auditor" | "report_synthesizer";
+export type AgentRunStatus = "queued" | "running" | "completed" | "failed" | "skipped" | "incomplete";
+
+export interface AgentRun {
+  agent_run_id: string;
+  task_id: string;
+  role: AgentRole;
+  stage: string;
+  status: AgentRunStatus;
+  parent_run_id: string | null;
+  branch_id: string | null;
+  input_refs: string[];
+  output_refs: string[];
+  summary: string;
+  error_code: string | null;
+  retry_count: number;
+  started_at: string;
+  completed_at: string | null;
+}
+
+export interface HypothesisBranch {
+  branch_id: string;
+  task_id: string;
+  parent_branch_id: string | null;
+  hypothesis: string;
+  mechanism_summary: string;
+  supporting_evidence_ids: string[];
+  opposing_evidence_ids: string[];
+  applicability: "direct" | "related" | "cross_equipment" | "unknown";
+  missing_fields: string[];
+  checks: string[];
+  gate_status: "pending" | "qualified" | "blocked" | "review_incomplete";
+  disposition: "retained" | "omitted" | "needs_more_information";
+  ordinal: number;
+}
+
 export interface Evidence {
   evidence_id: string;
   task_id: string;

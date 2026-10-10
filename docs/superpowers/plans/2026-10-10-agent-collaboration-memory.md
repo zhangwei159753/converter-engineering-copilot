@@ -217,23 +217,23 @@ Expected: PASS; no rejected, incomplete, synthetic, or source-less item is retur
 - `AgentTimeline` renders role, status, duration, safe summary, and retry; it clearly labels generated summaries as execution notes, not raw CoT.
 - `HypothesisTree` renders at most the returned bounded branches with support/opposition counts, applicability, gate disposition, missing fields, checks, and `EvidenceDrawer` navigation by evidence ID.
 
-- [ ] **Step 1: Write failing component tests** for in-progress/failed/incomplete agents, empty states, supported/opposing evidence links, unknown evidence IDs, and accessible status labels.
-- [ ] **Step 2: Run targeted Vitest tests and confirm components are absent.**
+- [x] **Step 1: Write failing component tests** for in-progress/failed/incomplete agents, empty states, supported/opposing evidence links, unknown evidence IDs, and accessible status labels.
+- [x] **Step 2: Run targeted Vitest tests and confirm components are absent.**
 
 Run: `npm test -- --run src/components/AgentTimeline.test.tsx src/components/HypothesisTree.test.tsx`
 
 Expected: FAIL before the new components are implemented.
 
-- [ ] **Step 3: Add typed client methods and fallback behavior** for absent records on old tasks without hiding API failures.
-- [ ] **Step 4: Implement accessible timeline and hypothesis tree** using existing visual tokens, buttons, and evidence drawer contracts.
-- [ ] **Step 5: Integrate the timeline on `TaskPage` and the branch comparison on `ReportPage`**; retain all current report sections and markdown export.
-- [ ] **Step 6: Run targeted component tests and production build.**
+- [x] **Step 3: Add typed client methods and fallback behavior** for absent records on old tasks without hiding API failures.
+- [x] **Step 4: Implement accessible timeline and hypothesis tree** using existing visual tokens, buttons, and evidence drawer contracts.
+- [x] **Step 5: Integrate the timeline on `TaskPage` and the branch comparison on `ReportPage`**; retain all current report sections and markdown export.
+- [x] **Step 6: Run targeted component tests and production build.**
 
 Run: `npm test -- --run src/components/AgentTimeline.test.tsx src/components/HypothesisTree.test.tsx src/pages/TaskPage.test.tsx src/pages/ReportPage.test.tsx` and `npm run build`
 
 Expected: PASS; TypeScript production bundle builds with the legacy task/report UI intact.
 
-- [ ] **Step 7: Commit** as `feat: visualize agent collaboration and hypotheses`.
+- [x] **Step 7: Commit** as `feat: visualize agent collaboration and hypotheses`.
 
 ### Task 7: Related reviewed memory in work-order UI
 
