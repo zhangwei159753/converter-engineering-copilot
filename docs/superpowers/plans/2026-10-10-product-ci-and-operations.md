@@ -36,11 +36,11 @@
 - Create: `conftest.py`
 - Test: Create `tests/converter_copilot/test_pytest_config.py`
 
-- [ ] Add `test_legacy_live_test_collects_with_root_cli_option`, launching `python -m pytest --collect-only src/legacy/tests/test_report_quality.py --research-agent=multi_agent` and asserting collection succeeds.
-- [ ] Run `uv run pytest tests/converter_copilot/test_pytest_config.py -q`; expected: the subprocess fails because root pytest does not register `--research-agent`.
-- [ ] Register `--research-agent`, `--search-api`, `--eval-model`, `--supervisor-model`, `--researcher-model`, `--planner-provider`, `--planner-model`, `--writer-provider`, `--writer-model`, and `--max-search-depth` once in a root-loaded `conftest.py`; remove duplicate option registration from `src/legacy/tests/conftest.py` while retaining its fixtures.
-- [ ] Re-run the subprocess check and `uv run pytest --collect-only tests/converter_copilot src/legacy/tests --research-agent=multi_agent`; expected: product and legacy tests collect and CLI flags parse. Collection is not reported as live test success.
-- [ ] Commit as `test: make product and legacy pytest discovery explicit`.
+- [x] Add `test_legacy_live_test_collects_with_root_cli_option`, launching `python -m pytest --collect-only src/legacy/tests/test_report_quality.py --research-agent=multi_agent` and asserting collection succeeds.
+- [x] Run `uv run pytest tests/converter_copilot/test_pytest_config.py -q`; expected: the subprocess fails because root pytest does not register `--research-agent`.
+- [x] Register `--research-agent`, `--search-api`, `--eval-model`, `--supervisor-model`, `--researcher-model`, `--planner-provider`, `--planner-model`, `--writer-provider`, `--writer-model`, and `--max-search-depth` once in a root-loaded `conftest.py`; remove duplicate option registration from `src/legacy/tests/conftest.py` while retaining its fixtures.
+- [x] Re-run the subprocess check and `uv run pytest --collect-only tests/converter_copilot src/legacy/tests --research-agent=multi_agent`; expected: product and legacy tests collect and CLI flags parse. Collection is not reported as live test success.
+- [x] Commit as `test: make product and legacy pytest discovery explicit`.
 
 ### Task 2: Add deterministic backend and migration CI job
 
