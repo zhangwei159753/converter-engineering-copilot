@@ -4,7 +4,7 @@ This walkthrough uses only synthetic demonstration cases. It requires a configur
 
 ## 1. Start the application
 
-Use the local setup in the root [README](../README.md), or start the Docker Compose services. Check `/api/health` and `/api/ready`; the latter checks SQLite availability.
+Use the local setup in the root [README](../README.md), or start the Docker Compose services. Check `/api/health` and `/api/ready`; the latter checks that SQLite can acquire a write lock within one second and that the worker is running.
 
 ## 2. Import synthetic maintenance rows
 

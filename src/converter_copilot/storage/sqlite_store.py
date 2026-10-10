@@ -129,12 +129,16 @@ class SQLiteStore:
             connection.execute("BEGIN IMMEDIATE")
             if idempotency_key is not None:
                 existing = connection.execute(
-                    """SELECT t.* FROM task_retries r JOIN tasks t ON t.task_id = r.retry_task_id
+                    """SELECT t.*, r.original_task_id AS retry_original_task_id
+                    FROM task_retries r JOIN tasks t ON t.task_id = r.retry_task_id
                     WHERE r.idempotency_key = ?""",
                     (idempotency_key,),
                 ).fetchone()
                 if existing is not None:
-                    if existing["request_hash"] != request_hash:
+                    if (
+                        existing["request_hash"] != request_hash
+                        or existing["retry_original_task_id"] != original_task_id
+                    ):
                         raise IdempotencyConflictError("Idempotency-Key was already used with a different request.")
                     return self._task_from_row(existing), True
             original = connection.execute(
@@ -184,6 +188,18 @@ class SQLiteStore:
             ).fetchall()
         return [self._task_from_row(row) for row in rows]
 
+    def check_writable(self, *, timeout_seconds: float = 1.0) -> None:
+        """Check bounded SQLite write-lock availability without changing data."""
+        if timeout_seconds <= 0:
+            raise ValueError("Readiness write-check timeout must be positive.")
+        connection = sqlite3.connect(self.database_path, timeout=timeout_seconds)
+        try:
+            connection.execute(f"PRAGMA busy_timeout = {int(timeout_seconds * 1000)}")
+            connection.execute("BEGIN IMMEDIATE")
+            connection.rollback()
+        finally:
+            connection.close()
+
     def update_task_status(
         self, task_id: str, status: str, *, worker_id: str | None = None
     ) -> TaskRecord | None:
@@ -209,9 +225,20 @@ class SQLiteStore:
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
-                "SELECT lease_owner FROM tasks WHERE task_id = ?", (task_id,)
+                "SELECT status, lease_owner, lease_expires_at FROM tasks WHERE task_id = ?", (task_id,)
             ).fetchone()
-            if row is None or row["lease_owner"] != worker_id:
+            lease_expires_at = (
+                datetime.fromisoformat(row["lease_expires_at"])
+                if row is not None and row["lease_expires_at"]
+                else None
+            )
+            if (
+                row is None
+                or row["status"] != "running"
+                or row["lease_owner"] != worker_id
+                or lease_expires_at is None
+                or lease_expires_at <= now
+            ):
                 return False
             connection.execute(
                 """INSERT INTO reports(task_id, payload_json) VALUES (?, ?)
@@ -268,8 +295,8 @@ class SQLiteStore:
         with self._connect() as connection:
             cursor = connection.execute(
                 """UPDATE tasks SET lease_expires_at = ?, updated_at = ?
-                WHERE task_id = ? AND status = 'running' AND lease_owner = ?""",
-                (expires_at.isoformat(), now.isoformat(), task_id, worker_id),
+                WHERE task_id = ? AND status = 'running' AND lease_owner = ? AND lease_expires_at > ?""",
+                (expires_at.isoformat(), now.isoformat(), task_id, worker_id, now.isoformat()),
             )
         return cursor.rowcount == 1
 
@@ -283,7 +310,7 @@ class SQLiteStore:
     def _requeue_expired(self, connection: sqlite3.Connection, now: datetime) -> list[str]:
         rows = connection.execute(
             """SELECT task_id, attempt, max_attempts FROM tasks
-            WHERE status = 'running' AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?
+            WHERE status = 'running' AND (lease_expires_at IS NULL OR lease_expires_at <= ?)
             ORDER BY created_at, task_id""",
             (now.isoformat(),),
         ).fetchall()
@@ -320,8 +347,8 @@ class SQLiteStore:
             cursor = connection.execute(
                 """UPDATE tasks SET status = 'failed', updated_at = ?, lease_owner = NULL,
                 lease_expires_at = NULL, error_code = ?
-                WHERE task_id = ? AND status = 'running' AND lease_owner = ?""",
-                (now.isoformat(), error_code, task_id, worker_id),
+                WHERE task_id = ? AND status = 'running' AND lease_owner = ? AND lease_expires_at > ?""",
+                (now.isoformat(), error_code, task_id, worker_id, now.isoformat()),
             )
             if cursor.rowcount != 1:
                 return False

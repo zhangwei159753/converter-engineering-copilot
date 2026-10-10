@@ -88,6 +88,33 @@ def test_only_current_lease_owner_can_renew(tmp_path):
     assert store.get_task(task.task_id).attempt == 1
 
 
+def test_expired_owner_cannot_finish_fail_or_renew_before_recovery_scan(tmp_path):
+    store = SQLiteStore(tmp_path / "expired-owner.db")
+    task, _ = store.create_task(_request())
+    store.claim_next_task("worker-expired", lease_seconds=30)
+    with store._connect() as connection:
+        connection.execute(
+            "UPDATE tasks SET lease_expires_at = ? WHERE task_id = ?",
+            ((datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat(), task.task_id),
+        )
+
+    assert store.finish_task(task.task_id, _report(task.task_id), worker_id="worker-expired") is False
+    assert store.fail_task(task.task_id, worker_id="worker-expired", error_code="workflow_error") is False
+    assert store.renew_task_lease(task.task_id, "worker-expired", lease_seconds=30) is False
+    assert store.get_report(task.task_id) is None
+
+
+def test_legacy_running_task_without_lease_is_recovered(tmp_path):
+    store = SQLiteStore(tmp_path / "legacy-running.db")
+    task, _ = store.create_task(_request())
+    store.update_task_status(task.task_id, "running")
+
+    assert store.requeue_expired_tasks() == [task.task_id]
+    recovered = store.get_task(task.task_id)
+    assert recovered.status == "queued"
+    assert [event.stage for event in store.events_after(task.task_id)].count("recovered") == 1
+
+
 def test_worker_settings_reject_non_positive_limits():
     with pytest.raises(ValueError, match="must be positive"):
         WorkerSettings(concurrency=0)
@@ -161,7 +188,7 @@ async def test_worker_never_exceeds_configured_concurrency(tmp_path, monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_failed_attempt_persists_safe_error_category(tmp_path, monkeypatch):
+async def test_failed_attempt_persists_safe_error_category_without_logging_exception_text(tmp_path, monkeypatch, caplog):
     class FailingGraph:
         async def ainvoke(self, state):
             raise RuntimeError("provider key=secret-value should never be persisted")
@@ -171,6 +198,8 @@ async def test_failed_attempt_persists_safe_error_category(tmp_path, monkeypatch
     runner = _runner(store, monkeypatch, FailingGraph())
 
     assert await runner.run_once() is True
+    assert "secret-value" not in caplog.text
+    assert "provider key=" not in caplog.text
     record = store.get_task(task.task_id)
     assert record.status == "failed"
     assert record.error_code == "workflow_error"

@@ -37,7 +37,7 @@
    npm run dev
    ```
 
-4. 打开 <http://localhost:5173>。API 文档在 <http://localhost:8000/docs>，`/api/health` 检查进程存活，`/api/ready` 检查 SQLite 和后台 worker 是否可用。
+4. 打开 <http://localhost:5173>。API 文档在 <http://localhost:8000/docs>，`/api/health` 检查进程存活，`/api/ready` 检查 SQLite 能否在 1 秒内获得写锁并确认后台 worker 正在运行。
 
 数据库、Chroma 向量索引、FastEmbed 模型缓存和评测结果默认写入 `.data/`。文档导入接受 `.pdf`、`.md` 和 `.csv`。向量模型默认使用适合中文技术资料的 `BAAI/bge-small-zh-v1.5`，首次导入或检索时会下载模型；需要联网及约 100 MB 磁盘空间。向量集合使用新的 `converter_engineering_copilot_bge_small_zh_v1_5` 名称，保留旧 OpenAI 向量集合不动；已有资料需重新导入以生成本地向量。不要上传未经授权的工厂、客户或个人数据。
 

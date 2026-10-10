@@ -75,7 +75,7 @@ def create_app(runner: TaskRunner | None = None) -> FastAPI:
                 },
             )
         try:
-            runner.store.list_tasks(limit=1)
+            runner.store.check_writable(timeout_seconds=1.0)
         except sqlite3.Error:
             return JSONResponse(
                 status_code=503,

@@ -62,7 +62,7 @@ class TaskRunner:
     async def create(
         self, request: TaskCreate, *, idempotency_key: str | None = None
     ) -> tuple[TaskRecord, bool]:
-        """Validate availability, persist a queued task, then schedule one run."""
+        """Validate availability and persist a task for worker discovery."""
         if request.mode not in self._AVAILABLE_MODES:
             raise WorkflowUnavailableError(f"The {request.mode.value} workflow is not available yet.")
         record, reused = self.store.create_task(request, idempotency_key=idempotency_key)
@@ -161,7 +161,7 @@ class TaskRunner:
         except asyncio.TimeoutError:
             self.store.fail_task(task_id, worker_id=self._worker_id, error_code="task_timeout")
         except Exception:
-            logger.exception("Task execution failed: %s", task_id)
+            logger.error("Task execution failed: task_id=%s error_code=workflow_error", task_id)
             self.store.fail_task(task_id, worker_id=self._worker_id, error_code="workflow_error")
         finally:
             current = self._active.get(task_id)

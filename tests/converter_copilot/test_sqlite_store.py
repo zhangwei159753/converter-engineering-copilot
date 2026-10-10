@@ -206,11 +206,26 @@ def test_retry_key_reuses_retry_and_retry_link_is_atomic(tmp_path):
     assert [event.stage for event in store.events_after(first.task_id)] == ["queued", "retry"]
 
 
+def test_retry_idempotency_key_is_bound_to_original_task(tmp_path):
+    store = SQLiteStore(tmp_path / "retry-scope.db")
+    first_original, _ = store.create_task(_request())
+    second_original, _ = store.create_task(_request())
+    store.update_task_status(first_original.task_id, "failed")
+    store.update_task_status(second_original.task_id, "failed")
+    store.create_retry(first_original.task_id, _request(), idempotency_key="retry-shared")
+
+    with pytest.raises(IdempotencyConflictError):
+        store.create_retry(second_original.task_id, _request(), idempotency_key="retry-shared")
+
+    assert store.retry_count(first_original.task_id) == 1
+    assert store.retry_count(second_original.task_id) == 0
+
+
 def test_finish_task_rolls_back_report_status_and_event_together(tmp_path):
     database = tmp_path / "finish.db"
     store = SQLiteStore(database)
     task, _ = store.create_task(_request())
-    store.update_task_status(task.task_id, "running", worker_id="worker-1")
+    store.claim_next_task("worker-1", lease_seconds=30)
     report = ConverterReport(
         task_id=task.task_id,
         mode="fault_analysis",
@@ -231,4 +246,4 @@ def test_finish_task_rolls_back_report_status_and_event_together(tmp_path):
 
     assert store.get_report(task.task_id) is None
     assert store.get_task(task.task_id).status == "running"
-    assert [event.stage for event in store.events_after(task.task_id)] == ["queued"]
+    assert [event.stage for event in store.events_after(task.task_id)] == ["queued", "workflow"]

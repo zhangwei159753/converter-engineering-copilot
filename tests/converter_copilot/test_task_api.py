@@ -1,4 +1,5 @@
 import json
+import sqlite3
 import time
 from contextlib import contextmanager
 
@@ -236,3 +237,19 @@ def test_migration_failure_keeps_liveness_and_marks_readiness_unavailable(tmp_pa
         assert readiness.status_code == 503
         assert readiness.json()["components"]["database"] == "unavailable"
         assert "private migration detail" not in readiness.text
+
+
+def test_readiness_checks_bounded_sqlite_write_availability(tmp_path, monkeypatch):
+    store = SQLiteStore(tmp_path / "write-unavailable.db")
+    runner = TaskRunner(store=store, deps_provider=lambda: WorkflowDeps(model=NeverModel(), search=EmptySearch(), vector_index=EmptyIndex()))
+
+    def fail_write_check(*, timeout_seconds):
+        assert timeout_seconds == 1.0
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(store, "check_writable", fail_write_check)
+    with TestClient(create_app(runner=runner)) as client:
+        readiness = client.get("/api/ready")
+        assert readiness.status_code == 503
+        assert readiness.json()["status"] == "not_ready"
+        assert readiness.json()["components"]["database"] == "unavailable"

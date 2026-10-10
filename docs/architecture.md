@@ -30,7 +30,7 @@ The repository retains the upstream `open_deep_research` graph. The added `conve
 
 - SQLite: `.data/converter_copilot.db` by default.
 - Schema changes use ordered `PRAGMA user_version` migrations. Before upgrading a non-empty database, the API creates a consistent SQLite online backup under `.data/backups/` by default. Backup or migration failure keeps the worker stopped and readiness unavailable.
-- The API lifespan initializes storage, recovers expired leases, then starts the worker. `/api/health` is a process liveness check. `/api/ready` returns HTTP 200 only when SQLite is readable and the worker polling task is alive; otherwise it returns HTTP 503 with safe component states.
+- The API lifespan initializes storage, recovers expired leases, then starts the worker. `/api/health` is a process liveness check. `/api/ready` returns HTTP 200 only when SQLite can acquire a write lock within one second (then rolls the transaction back) and the worker polling task is alive; otherwise it returns HTTP 503 with safe component states.
 - Recovery is at least once. After a process exit during a model call, that call may be repeated when its lease expires. The worker fences report and failure commits by lease owner, so a stale worker cannot overwrite a newer attempt. The Web task page shows attempt counts, recovery events, and safe error guidance.
 - Run one API process against a local data directory. SQLite and Chroma do not support this app's shared single-instance worker contract across multiple API replicas.
 - Chroma: `.data/chroma` by default, using the local FastEmbed BGE-small-zh model unless an embedding function is injected for tests. The DeepSeek-backed collection has a versioned name so existing OpenAI vectors remain untouched; re-import source documents to populate it.
@@ -46,7 +46,7 @@ For local development, Vite proxies `/api` to `http://localhost:8000`. In Compos
 
 - Missing API configuration prevents task dependency construction; the UI and API process can still start for health checks.
 - Empty retrieval produces a partial report instead of fabricated hypotheses or comparisons.
-- Provider/workflow exceptions mark the task failed with a safe category such as `workflow_error` or `task_timeout`; API responses and task events do not include raw exception text or worker IDs.
+- Provider/workflow exceptions mark the task failed with a safe category such as `workflow_error` or `task_timeout`; application logs, API responses, and task events do not include raw exception text or worker IDs.
 - A citation marked `supported` means the report's evidence ID resolves and its source is not marked conflicting. It is not an independent fact check.
 - Case similarity is a retrieval hint, not a causal conclusion. Synthetic demo rows are clearly identified in the source dataset and must not be represented as field history.
 - The app does not connect to equipment or issue control commands. A qualified engineer must verify findings against source manuals, measurements, and site procedures.
