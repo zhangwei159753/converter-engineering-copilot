@@ -1,0 +1,44 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: api
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      CONVERTER_MODEL: ${CONVERTER_MODEL:-gpt-4.1-mini}
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+      LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
+      LANGSMITH_PROJECT: ${LANGSMITH_PROJECT:-converter-engineering-copilot}
+      LANGSMITH_TRACING: ${LANGSMITH_TRACING:-false}
+      CONVERTER_DB_PATH: /app/.data/converter_copilot.db
+      CHROMA_PERSIST_DIR: /app/.data/chroma
+      WEB_ORIGIN: http://localhost:5173
+    volumes:
+      - converter_data:/app/.data
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/ready', timeout=3)
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: web
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "5173:80"
+
+volumes:
+  converter_data:

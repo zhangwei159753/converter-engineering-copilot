@@ -1,9 +1,11 @@
 """FastAPI app factory for local Converter Engineering Copilot demos."""
 
 import os
+import sqlite3
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from converter_copilot.api.routes.cases import build_case_router
 from converter_copilot.api.routes.tasks import build_task_router
@@ -30,6 +32,17 @@ def create_app(runner: TaskRunner | None = None) -> FastAPI:
     @app.get("/api/health")
     def health():
         return {"status": "ok", "service": "converter-engineering-copilot"}
+
+    @app.get("/api/ready")
+    def readiness():
+        try:
+            runner.store.list_tasks(limit=1)
+        except sqlite3.Error:
+            return JSONResponse(
+                status_code=503,
+                content={"status": "not_ready", "components": {"database": "unavailable"}},
+            )
+        return {"status": "ready", "components": {"database": "ready"}}
 
     return app
 
