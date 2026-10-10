@@ -78,6 +78,23 @@ def test_expired_running_lease_is_requeued_once(tmp_path):
     assert [event.stage for event in store.events_after(task.task_id)].count("recovered") == 1
 
 
+def test_only_current_lease_owner_can_renew(tmp_path):
+    store = SQLiteStore(tmp_path / "renew.db")
+    task, _ = store.create_task(_request())
+    store.claim_next_task("worker-current", lease_seconds=30)
+
+    assert store.renew_task_lease(task.task_id, "worker-current", lease_seconds=45) is True
+    assert store.renew_task_lease(task.task_id, "worker-stale", lease_seconds=45) is False
+    assert store.get_task(task.task_id).attempt == 1
+
+
+def test_worker_settings_reject_non_positive_limits():
+    with pytest.raises(ValueError, match="must be positive"):
+        WorkerSettings(concurrency=0)
+    with pytest.raises(ValueError, match="poll interval"):
+        WorkerSettings(poll_seconds=0)
+
+
 def test_expired_task_at_attempt_limit_becomes_failed(tmp_path):
     store = SQLiteStore(tmp_path / "exhausted.db")
     task, _ = store.create_task(_request())

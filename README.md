@@ -37,9 +37,29 @@
    npm run dev
    ```
 
-4. 打开 <http://localhost:5173>。API 文档在 <http://localhost:8000/docs>，存活检查在 `/api/health`，SQLite readiness 检查在 `/api/ready`。
+4. 打开 <http://localhost:5173>。API 文档在 <http://localhost:8000/docs>，`/api/health` 检查进程存活，`/api/ready` 检查 SQLite 和后台 worker 是否可用。
 
 数据库、Chroma 向量索引、FastEmbed 模型缓存和评测结果默认写入 `.data/`。文档导入接受 `.pdf`、`.md` 和 `.csv`。向量模型默认使用适合中文技术资料的 `BAAI/bge-small-zh-v1.5`，首次导入或检索时会下载模型；需要联网及约 100 MB 磁盘空间。向量集合使用新的 `converter_engineering_copilot_bge_small_zh_v1_5` 名称，保留旧 OpenAI 向量集合不动；已有资料需重新导入以生成本地向量。不要上传未经授权的工厂、客户或个人数据。
+
+### 本地任务可靠性
+
+SQLite 在 API 启动时执行版本化迁移。升级已有非空数据库前，应用会通过 SQLite 在线备份生成一致副本，默认放在 `.data/backups/`，文件名包含原数据库名、目标 schema 版本和时间。迁移或备份失败时不会启动 worker；`/api/health` 仍返回进程存活，`/api/ready` 返回 HTTP 503。迁移前请确认备份目录所在磁盘有足够空间。
+
+此版本按单机单实例运行：一个 API 进程独占 `.data/` 下的 SQLite、Chroma 和模型缓存。不要启动多个 API 容器或进程共享同一数据目录。Compose 已将这些数据放在 `converter_data` 命名卷中。
+
+后台 worker 从 SQLite 中领取已排队任务，默认并发为 1。服务重启后会继续处理排队任务；运行中任务的租约过期后会重新排队，达到最大尝试次数后转为失败。任务处理按“至少一次”保证：进程在模型调用期间退出时，模型调用可能再次发生，因此外部调用和费用可能重复；报告与终态事件仍在一个 SQLite 事务中提交。
+
+可在 `.env` 中调整以下设置，默认值适用于本地单机：
+
+| 环境变量 | 默认值 | 含义 |
+| --- | ---: | --- |
+| `CONVERTER_WORKER_CONCURRENCY` | `1` | 同时执行的任务数 |
+| `CONVERTER_WORKER_POLL_SECONDS` | `0.5` | 空闲 worker 的轮询间隔 |
+| `CONVERTER_TASK_LEASE_SECONDS` | `60` | 任务租约及续租时长 |
+| `CONVERTER_TASK_TIMEOUT_SECONDS` | `1800` | 单任务最长执行时间 |
+| `CONVERTER_TASK_MAX_ATTEMPTS` | `3` | worker 自动恢复的最大执行次数 |
+
+任务详情页显示执行尝试次数、租约恢复事件和按错误码生成的安全处理建议。API 和任务事件不会返回 worker ID、密钥或原始异常文本；需要排查时请查看本机 API 服务日志。若需恢复迁移前备份，请先停止 API，再将选定的备份文件复制为 `CONVERTER_DB_PATH` 指向的数据库文件，然后重新启动服务。
 
 ## Docker Compose
 
@@ -49,7 +69,7 @@
 docker compose up --build
 ```
 
-Web 工作台在 <http://localhost:5173>，API 文档在 <http://localhost:8000/docs>。Compose 使用命名卷保存数据库、Chroma 和 FastEmbed 模型；模型、搜索、LangSmith 密钥仅传给 API 容器，Web 镜像不包含这些密钥。DeepSeek key 没有配置时，页面和健康检查仍可打开，但模型任务会失败并展示服务状态。
+Web 工作台在 <http://localhost:5173>，API 文档在 <http://localhost:8000/docs>。Compose 使用命名卷保存数据库、Chroma 和 FastEmbed 模型；模型、搜索、LangSmith 密钥仅传给 API 容器，Web 镜像不包含这些密钥。DeepSeek key 没有配置时，页面和存活检查仍可打开，但模型任务会失败并展示安全错误指引。查看 API 日志可用 `docker compose logs -f api`；停止服务但保留本地数据可用 `docker compose down`。
 
 ## 评测
 

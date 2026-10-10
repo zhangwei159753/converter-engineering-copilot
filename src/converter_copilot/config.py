@@ -68,6 +68,7 @@ class WorkerSettings:
     @classmethod
     def from_env(cls) -> "WorkerSettings":
         """Read worker limits from environment variables and validate them."""
+        load_dotenv()
         return cls(
             concurrency=int(os.getenv("CONVERTER_WORKER_CONCURRENCY", "1")),
             poll_seconds=float(os.getenv("CONVERTER_WORKER_POLL_SECONDS", "0.5")),

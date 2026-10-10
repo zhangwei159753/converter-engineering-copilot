@@ -63,7 +63,11 @@ def test_valid_request_runs_and_report_becomes_available(tmp_path):
         response = client.post("/api/tasks", json=_fault_request())
         assert response.status_code == 202
         task_id = response.json()["task"]["task_id"]
-        assert _wait_for_terminal(client, task_id)["status"] == "partial"
+        terminal = _wait_for_terminal(client, task_id)
+        assert terminal["status"] == "partial"
+        assert terminal["attempt"] == 1
+        assert terminal["max_attempts"] == 3
+        assert "lease_owner" not in terminal
         assert client.get(f"/api/tasks/{task_id}/report").status_code == 200
 
 
