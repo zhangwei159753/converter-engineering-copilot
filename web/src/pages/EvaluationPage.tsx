@@ -22,6 +22,7 @@ export default function EvaluationPage() {
   const [selectedId, setSelectedId] = useState("");
   const [mode, setMode] = useState("");
   const [status, setStatus] = useState("");
+  const [sourceType, setSourceType] = useState("");
   const [reviewer, setReviewer] = useState(() => localStorage.getItem("evaluation-reviewer") ?? "");
   const [labels, setLabels] = useState<EvaluationExample["evidence_labels"]>([]);
   const [retrievalIds, setRetrievalIds] = useState<string[]>([]);
@@ -36,14 +37,14 @@ export default function EvaluationPage() {
 
   async function refresh() {
     const [nextSummary, nextRows] = await Promise.all([
-      getEvaluationSummary(), listEvaluationExamples({ mode, status, limit: 100 }),
+      getEvaluationSummary(), listEvaluationExamples({ mode, status, source_type: sourceType, limit: 100 }),
     ]);
     setSummary(nextSummary);
     setExamples(nextRows.items);
     setSelectedId((current) => nextRows.items.some((item) => item.review_id === current) ? current : nextRows.items[0]?.review_id ?? "");
   }
 
-  useEffect(() => { refresh().catch((reason) => setError(reason instanceof Error ? reason.message : "评测台账加载失败。")); }, [mode, status]);
+  useEffect(() => { refresh().catch((reason) => setError(reason instanceof Error ? reason.message : "评测台账加载失败。")); }, [mode, status, sourceType]);
   useEffect(() => {
     if (!selected) return;
     setLabels(selected.evidence_labels);
@@ -88,6 +89,10 @@ export default function EvaluationPage() {
   const counts = Object.values(summary?.modes ?? {}).reduce((total, item) => ({
     total: total.total + item.total, pending: total.pending + item.pending, reviewed: total.reviewed + item.reviewed,
   }), { total: 0, pending: 0, reviewed: 0 });
+  const sourceTypes = Object.entries(summary?.modes ?? {})
+    .filter(([modeName]) => !mode || modeName === mode)
+    .flatMap(([, item]) => Object.keys(item.source_types));
+  const uniqueSourceTypes = [...new Set(sourceTypes)].sort();
 
   return <div className="evaluation-page">
     <div className="workspace-heading"><div><div className="breadcrumb"><span>质量管理</span><span>／</span><span>人工评测</span></div><h1>把模型输出放进复核闭环<span>.</span></h1><p>复核证据与检索标签，保留每次修改记录；未复核数据不会进入质量指标。</p></div><div className="heading-stamp"><span>HUMAN REVIEW</span><strong>{String(counts.total).padStart(2, "0")}</strong><small>LOCAL EVALUATION</small></div></div>
@@ -96,7 +101,7 @@ export default function EvaluationPage() {
       <div><small>全部样例</small><strong>{counts.total}</strong></div><div><small>待复核</small><strong>{counts.pending}</strong></div><div><small>已复核</small><strong>{counts.reviewed}</strong></div>
       <label className="eval-upload"><FileUp size={16} />{busy ? "处理中…" : "导入 review bundle"}<input aria-label="导入 review bundle" type="file" accept="application/json,.json" disabled={busy} onChange={(event) => upload(event.target.files?.[0])} /></label>
     </section>
-    <div className="eval-filters"><label>工作流<select value={mode} onChange={(event) => setMode(event.target.value)}><option value="">全部工作流</option><option value="fault_analysis">故障分析</option><option value="technical_research">技术研究</option></select></label><label>复核状态<select value={status} onChange={(event) => setStatus(event.target.value)}><option value="">全部状态</option><option value="pending">待复核</option><option value="reviewed">已复核</option></select></label><div className="eval-metric-note"><ShieldAlert size={14} />{summary?.metric_status.retrieval_recall_at_k === "insufficient_labels" || summary?.metric_status.manual_evidence_support_rate === "insufficient_labels" ? "标签不足，未达到条件的指标显示 null。" : "质量指标使用已复核标签计算。"} 检索 {summary?.metric_sample_counts.retrieval_labeled_examples ?? 0} 条 · 证据 {summary?.metric_sample_counts.reviewed_evidence_labels ?? 0} 条</div></div>
+    <div className="eval-filters"><label>工作流<select value={mode} onChange={(event) => setMode(event.target.value)}><option value="">全部工作流</option><option value="fault_analysis">故障分析</option><option value="technical_research">技术研究</option></select></label><label>复核状态<select value={status} onChange={(event) => setStatus(event.target.value)}><option value="">全部状态</option><option value="pending">待复核</option><option value="reviewed">已复核</option></select></label><label>来源类型<select value={sourceType} onChange={(event) => setSourceType(event.target.value)}><option value="">全部来源</option>{uniqueSourceTypes.map((value) => <option key={value} value={value}>{value}</option>)}</select></label><div className="eval-metric-note"><ShieldAlert size={14} />{summary?.metric_status.retrieval_recall_at_k === "insufficient_labels" || summary?.metric_status.manual_evidence_support_rate === "insufficient_labels" ? "标签不足，未达到条件的指标显示 null。" : "质量指标使用已复核标签计算。"} 检索 {summary?.metric_sample_counts.retrieval_labeled_examples ?? 0} 条 · 证据 {summary?.metric_sample_counts.reviewed_evidence_labels ?? 0} 条</div></div>
     <div className="eval-layout">
       <aside className="eval-queue"><div className="aside-title"><span>复核队列</span><span className="count-badge">{examples.length.toString().padStart(2, "0")}</span></div>{examples.length ? examples.map((example) => <button key={example.review_id} className={`eval-queue-row ${selected?.review_id === example.review_id ? "selected" : ""}`} onClick={() => setSelectedId(example.review_id)}><span className={`eval-queue-state ${example.status}`}>{example.status === "reviewed" ? <Check size={12} /> : "待"}</span><span><strong>{example.example_id}</strong><small>{example.mode === "fault_analysis" ? "故障分析" : "技术研究"} · {example.source_type}</small></span></button>) : <p className="eval-empty">暂无样例。请导入一次评测运行导出的 review bundle。</p>}</aside>
       <section className="eval-review-panel">{selected ? <>

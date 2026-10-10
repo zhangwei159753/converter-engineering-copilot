@@ -79,7 +79,7 @@ export function importReviewBundle(bundle: unknown): Promise<{ bundle_id: string
   return request("/api/evaluations/review-bundles", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(bundle) });
 }
 
-export function listEvaluationExamples(params: { mode?: string; status?: string; limit?: number; offset?: number } = {}): Promise<{ items: EvaluationExample[]; total: number }> {
+export function listEvaluationExamples(params: { mode?: string; status?: string; source_type?: string; limit?: number; offset?: number } = {}): Promise<{ items: EvaluationExample[]; total: number }> {
   const query = new URLSearchParams();
   Object.entries(params).forEach(([key, value]) => { if (value !== undefined && value !== "") query.set(key, String(value)); });
   return request(`/api/evaluations/examples?${query}`);

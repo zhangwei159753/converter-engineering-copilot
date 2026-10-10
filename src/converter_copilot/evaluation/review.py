@@ -164,13 +164,21 @@ class EvaluationReviewService:
         return BundleImportResult(bundle_id=bundle.bundle_id, imported_count=len(bundle.examples), skipped_count=0)
 
     def list_examples(
-        self, *, mode: str | None = None, status: str | None = None, limit: int = 50, offset: int = 0
+        self,
+        *,
+        mode: str | None = None,
+        status: str | None = None,
+        source_type: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
     ) -> tuple[list[EvaluationExample], int]:
         """Return filtered, bounded review rows and the matching total count."""
         if mode is not None and mode not in {item.value for item in TaskMode}:
             raise ValueError("Unsupported evaluation mode.")
         if status is not None and status not in {"pending", "reviewed"}:
             raise ValueError("Status must be pending or reviewed.")
+        if source_type is not None and not source_type.strip():
+            raise ValueError("Source type filter cannot be blank.")
         if not 1 <= limit <= 200 or offset < 0:
             raise ValueError("Pagination is out of range.")
         clauses, values = [], []
@@ -180,6 +188,9 @@ class EvaluationReviewService:
         if status:
             clauses.append("e.status = ?")
             values.append(status)
+        if source_type:
+            clauses.append("e.source_type = ?")
+            values.append(source_type)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         with self.store._connect() as connection:
             total = connection.execute(f"SELECT COUNT(*) FROM evaluation_examples e {where}", values).fetchone()[0]
@@ -302,8 +313,8 @@ class EvaluationReviewService:
         for row in reviewed:
             expected = set(json.loads(row["expected_retrieval_ids_json"]))
             if expected:
-                retrieved = {item["evidence_id"] for item in json.loads(row["evidence_json"])}
-                retrieval_scores.append(len(expected & retrieved) / len(expected))
+                retrieved = [item["evidence_id"] for item in json.loads(row["evidence_json"])][:5]
+                retrieval_scores.append(len(expected & set(retrieved)) / len(expected))
             support_labels.extend(
                 item["label"] for item in json.loads(row["evidence_labels_json"])
                 if item["label"] in {"supported", "unsupported"}

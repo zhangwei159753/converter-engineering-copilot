@@ -53,6 +53,10 @@ def test_evaluation_api_import_filter_review_history_and_null_metrics(tmp_path):
     pending = client.get("/api/evaluations/examples?mode=fault_analysis&status=pending&limit=1")
     assert pending.status_code == 200
     assert pending.json()["total"] == 1
+    filtered = client.get("/api/evaluations/examples?source_type=synthetic_demo_fixture")
+    assert filtered.status_code == 200
+    assert filtered.json()["total"] == 1
+    assert client.get("/api/evaluations/examples?source_type=unknown").json()["total"] == 0
     review_id = pending.json()["items"][0]["review_id"]
     summary = client.get("/api/evaluations").json()
     assert summary["metric_status"]["retrieval_recall_at_k"] == "insufficient_labels"

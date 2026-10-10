@@ -80,6 +80,9 @@ def test_filters_and_summary_keep_unreviewed_metrics_unavailable(service):
     items, total = reviews.list_examples(status="pending", limit=1)
     assert total == 1
     assert items[0].review_id == example.review_id
+    source_items, source_total = reviews.list_examples(source_type="synthetic_demo_fixture")
+    assert source_total == 1
+    assert source_items[0].source_type == "synthetic_demo_fixture"
     summary = reviews.summary()
     assert summary["modes"]["fault_analysis"]["pending"] == 1
     assert summary["metric_status"]["manual_evidence_support_rate"] == "insufficient_labels"

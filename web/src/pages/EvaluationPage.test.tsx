@@ -38,6 +38,8 @@ describe("EvaluationPage", () => {
     expect(screen.getByText("设备手册摘录内容")).toBeInTheDocument();
     expect(screen.getByText(/检索 0 条 · 证据 0 条/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "无法判断" })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("来源类型"), { target: { value: "synthetic_demo_fixture" } });
+    await waitFor(() => expect(api.listEvaluationExamples).toHaveBeenLastCalledWith(expect.objectContaining({ source_type: "synthetic_demo_fixture" })));
   });
 
   it("imports a review bundle and saves reviewer labels with history", async () => {

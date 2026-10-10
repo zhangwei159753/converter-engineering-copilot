@@ -35,11 +35,14 @@ def build_evaluation_router(runner: TaskRunner) -> APIRouter:
     def list_examples(
         mode: str | None = None,
         status: str | None = None,
+        source_type: str | None = None,
         limit: int = Query(default=50, ge=1, le=200),
         offset: int = Query(default=0, ge=0),
     ):
         try:
-            examples, total = service.list_examples(mode=mode, status=status, limit=limit, offset=offset)
+            examples, total = service.list_examples(
+                mode=mode, status=status, source_type=source_type, limit=limit, offset=offset
+            )
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
         return {"items": examples, "total": total, "limit": limit, "offset": offset}
