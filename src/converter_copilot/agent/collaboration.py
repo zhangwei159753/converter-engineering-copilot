@@ -176,7 +176,12 @@ def make_hypothesis_node(deps, budget: AgentBudget):
             )
             if deps.agent_event_sink is not None:
                 deps.agent_event_sink(record)
-            return {"agent_runs": [record], "hypothesis_candidates": [], "hypothesis_branches": []}
+            return {
+                "agent_runs": [record],
+                "hypothesis_candidates": [],
+                "hypothesis_branches": [],
+                "agent_warnings": ["没有检索到可用证据，未生成故障结论。"],
+            }
 
         remaining = state.get("agent_budget_remaining", budget.max_model_calls)
         if remaining < 1:
@@ -316,7 +321,7 @@ def make_branch_audit_node(deps, budget: AgentBudget):
                 }
             )
             status = "completed"
-            summary = audit.rationale_summary or f"检查了 {len(support_ids)} 条支持证据和 {len(valid_opposing)} 条反证。"
+            summary = f"检查了 {len(support_ids)} 条支持证据和 {len(valid_opposing)} 条反证。"
             warning = None
             unknown_ids = sorted((set(audit.supporting_evidence_ids) | set(audit.opposing_evidence_ids)) - set(evidence_by_id))
             if unknown_ids:
@@ -510,7 +515,7 @@ def make_synthesis_node(deps):
                 "claims": final_claims,
                 "quality_warnings": list(dict.fromkeys(warnings)),
                 "completion_status": "partial" if (
-                    state.get("agent_warnings") or omitted or check.conflicting_claim_ids or check.warnings
+                    not evidence or state.get("agent_warnings") or omitted or check.conflicting_claim_ids or check.warnings
                 ) else "completed",
             }
         )

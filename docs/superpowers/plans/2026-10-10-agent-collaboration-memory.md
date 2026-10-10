@@ -117,23 +117,23 @@ Expected: PASS with deterministic fake model/search adapters and no network call
 - Agent lifecycle writes append the existing `task_events` format with stable stages `agent:{role}` and safe status summaries; SSE remains the single event stream.
 - Terminal agent run records include safe error categories only; no exception strings, prompts, provider secrets, or hidden CoT.
 
-- [ ] **Step 1: Write failing runner tests** for start/completion persistence, sanitized failure, task reload, and monotonically ordered task event IDs.
-- [ ] **Step 2: Run the focused tests and confirm no agent lifecycle records are emitted.**
+- [x] **Step 1: Write failing runner tests** for start/completion persistence, sanitized failure, task reload, and monotonically ordered task event IDs.
+- [x] **Step 2: Run the focused tests and confirm no agent lifecycle records are emitted.**
 
 Run: `python -m pytest tests/converter_copilot/test_agent_run_lifecycle.py -q`
 
 Expected: FAIL before runner sinks are wired.
 
-- [ ] **Step 3: Bind persistence sinks per task** without mutating shared dependency providers; persist start and terminal state with stable run IDs.
-- [ ] **Step 4: Keep branch updates and report commit fenced by the current task lease** so stale attempts cannot overwrite the latest run.
-- [ ] **Step 5: Verify restart reads and SSE replay** from `events_after` after creating agent lifecycle records.
-- [ ] **Step 6: Run runner recovery, task event, and new agent lifecycle tests.**
+- [x] **Step 3: Bind persistence sinks per task** without mutating shared dependency providers; persist start and terminal state with stable run IDs.
+- [x] **Step 4: Keep branch updates and report commit fenced by the current task lease** so stale attempts cannot overwrite the latest run.
+- [x] **Step 5: Verify restart reads and SSE replay** from `events_after` after creating agent lifecycle records.
+- [x] **Step 6: Run runner recovery, task event, and new agent lifecycle tests.**
 
 Run: `python -m pytest tests/converter_copilot/test_agent_run_lifecycle.py tests/converter_copilot/test_durable_task_recovery.py -q`
 
 Expected: PASS; old task events remain readable and new agent events replay after reconnect.
 
-- [ ] **Step 7: Commit** as `feat: persist agent lifecycle in task events`.
+- [x] **Step 7: Commit** as `feat: persist agent lifecycle in task events`.
 
 ### Task 4: Read APIs for agent traces and hypothesis branches
 

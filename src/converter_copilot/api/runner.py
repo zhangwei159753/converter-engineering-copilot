@@ -1,6 +1,7 @@
 """Background task lifecycle orchestration over SQLite and LangGraph."""
 
 import asyncio
+import copy
 import hashlib
 import logging
 from collections.abc import Callable
@@ -339,8 +340,16 @@ class TaskRunner:
     async def _execute_claimed(self, record: TaskRecord, settings: WorkerSettings) -> None:
         task_id = record.task_id
         try:
-            deps = self.deps_provider()
+            # Provider objects may be shared by the API/worker; bind per-task sinks
+            # on a shallow copy so concurrent tasks never overwrite each other's callbacks.
+            deps = copy.copy(self.deps_provider())
             deps.case_store = self.store
+            deps.agent_event_sink = lambda agent_run: self.store.save_agent_run_for_worker(
+                agent_run, worker_id=self._worker_id
+            )
+            deps.agent_result_sink = lambda branches: self.store.replace_hypothesis_branches_for_worker(
+                task_id, branches, worker_id=self._worker_id
+            )
             graph = build_workflow(record.mode, deps)
             work = asyncio.create_task(
                 asyncio.wait_for(

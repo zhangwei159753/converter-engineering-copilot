@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import re
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -38,6 +39,15 @@ class RetryLimitError(ValueError):
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _safe_agent_summary(summary: str) -> str:
+    """Redact common credential assignments before an agent summary is persisted or replayed."""
+    return re.sub(
+        r"(?i)(api[_-]?key|token|secret|password|credential|凭据)\s*[:=：]\s*[^\s,;，；]+",
+        r"\1=[REDACTED]",
+        summary[:4000],
+    )
 
 
 class SQLiteStore:
@@ -629,42 +639,75 @@ class SQLiteStore:
     def save_agent_run(self, record: AgentRunRecord) -> None:
         """Insert or update one task-scoped role execution without raw prompts."""
         with self._connect() as connection:
-            existing = connection.execute(
-                "SELECT task_id FROM agent_runs WHERE agent_run_id = ?", (record.agent_run_id,)
-            ).fetchone()
-            if existing is not None and existing["task_id"] != record.task_id:
-                raise ValueError("Agent run ID is already assigned to another task.")
-            connection.execute(
-                """INSERT INTO agent_runs(
-                    agent_run_id, task_id, role, stage, status, parent_run_id, branch_id,
-                    input_refs_json, output_refs_json, summary, error_code, retry_count,
-                    started_at, completed_at, provider_usage_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(agent_run_id) DO UPDATE SET
-                    role=excluded.role, stage=excluded.stage, status=excluded.status,
-                    parent_run_id=excluded.parent_run_id, branch_id=excluded.branch_id,
-                    input_refs_json=excluded.input_refs_json, output_refs_json=excluded.output_refs_json,
-                    summary=excluded.summary, error_code=excluded.error_code,
-                    retry_count=excluded.retry_count, started_at=excluded.started_at,
-                    completed_at=excluded.completed_at, provider_usage_json=excluded.provider_usage_json""",
-                (
-                    record.agent_run_id,
-                    record.task_id,
-                    record.role,
-                    record.stage,
-                    record.status,
-                    record.parent_run_id,
-                    record.branch_id,
-                    json.dumps(record.input_refs, ensure_ascii=False),
-                    json.dumps(record.output_refs, ensure_ascii=False),
-                    record.summary,
-                    record.error_code,
-                    record.retry_count,
-                    record.started_at.isoformat(),
-                    record.completed_at.isoformat() if record.completed_at else None,
-                    json.dumps(record.provider_usage, ensure_ascii=False) if record.provider_usage is not None else None,
-                ),
+            self._save_agent_run(connection, record)
+
+    def save_agent_run_for_worker(self, record: AgentRunRecord, *, worker_id: str) -> bool:
+        """Persist a role transition and replayable event only while its worker owns the lease."""
+        now = _now()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            if not self._worker_owns_lease(connection, record.task_id, worker_id, now):
+                return False
+            self._save_agent_run(connection, record)
+            self._insert_event(
+                connection,
+                record.task_id,
+                f"agent:{record.role}",
+                record.status,
+                _safe_agent_summary(record.summary),
+                now,
             )
+        return True
+
+    @staticmethod
+    def _save_agent_run(connection: sqlite3.Connection, record: AgentRunRecord) -> None:
+        """Upsert one role record on an existing connection/transaction."""
+        existing = connection.execute(
+            "SELECT task_id FROM agent_runs WHERE agent_run_id = ?", (record.agent_run_id,)
+        ).fetchone()
+        if existing is not None and existing["task_id"] != record.task_id:
+            raise ValueError("Agent run ID is already assigned to another task.")
+        connection.execute(
+            """INSERT INTO agent_runs(
+                agent_run_id, task_id, role, stage, status, parent_run_id, branch_id,
+                input_refs_json, output_refs_json, summary, error_code, retry_count,
+                started_at, completed_at, provider_usage_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(agent_run_id) DO UPDATE SET
+                role=excluded.role, stage=excluded.stage, status=excluded.status,
+                parent_run_id=excluded.parent_run_id, branch_id=excluded.branch_id,
+                input_refs_json=excluded.input_refs_json, output_refs_json=excluded.output_refs_json,
+                summary=excluded.summary, error_code=excluded.error_code,
+                retry_count=excluded.retry_count, started_at=excluded.started_at,
+                completed_at=excluded.completed_at, provider_usage_json=excluded.provider_usage_json""",
+            (
+                record.agent_run_id,
+                record.task_id,
+                record.role,
+                record.stage,
+                record.status,
+                record.parent_run_id,
+                record.branch_id,
+                json.dumps(record.input_refs, ensure_ascii=False),
+                json.dumps(record.output_refs, ensure_ascii=False),
+                _safe_agent_summary(record.summary),
+                record.error_code,
+                record.retry_count,
+                record.started_at.isoformat(),
+                record.completed_at.isoformat() if record.completed_at else None,
+                json.dumps(record.provider_usage, ensure_ascii=False) if record.provider_usage is not None else None,
+            ),
+        )
+
+    @staticmethod
+    def _worker_owns_lease(connection: sqlite3.Connection, task_id: str, worker_id: str, now: datetime) -> bool:
+        row = connection.execute(
+            "SELECT status, lease_owner, lease_expires_at FROM tasks WHERE task_id = ?", (task_id,)
+        ).fetchone()
+        if row is None or row["status"] != "running" or row["lease_owner"] != worker_id:
+            return False
+        expires_at = datetime.fromisoformat(row["lease_expires_at"]) if row["lease_expires_at"] else None
+        return expires_at is not None and expires_at > now
 
     def list_agent_runs(self, task_id: str) -> list[AgentRunRecord]:
         """List role executions in stable start-time order."""
@@ -695,17 +738,44 @@ class SQLiteStore:
 
     def replace_hypothesis_branches(self, task_id: str, branches: list[HypothesisBranch]) -> None:
         """Replace a task's bounded branch snapshot atomically."""
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            self._replace_hypothesis_branches(connection, task_id, branches)
+
+    def replace_hypothesis_branches_for_worker(
+        self, task_id: str, branches: list[HypothesisBranch], *, worker_id: str
+    ) -> bool:
+        """Replace a branch snapshot and append its event only for the current lease owner."""
+        now = _now()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            if not self._worker_owns_lease(connection, task_id, worker_id, now):
+                return False
+            self._replace_hypothesis_branches(connection, task_id, branches)
+            self._insert_event(
+                connection,
+                task_id,
+                "agent:hypothesis_tree",
+                "updated",
+                f"候选证据审查结果已更新（{len(branches)} 个分支）。",
+                now,
+            )
+        return True
+
+    @staticmethod
+    def _replace_hypothesis_branches(
+        connection: sqlite3.Connection, task_id: str, branches: list[HypothesisBranch]
+    ) -> None:
+        """Write a validated bounded branch snapshot on an existing transaction."""
         ids = [branch.branch_id for branch in branches]
         ordinals = [branch.ordinal for branch in branches]
         if len(ids) != len(set(ids)) or len(ordinals) != len(set(ordinals)):
             raise ValueError("Hypothesis branches must have unique IDs and ordinals; duplicate found.")
         if any(branch.task_id != task_id for branch in branches):
             raise ValueError("All hypothesis branches must belong to the target task.")
-        with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            connection.execute("DELETE FROM hypothesis_branches WHERE task_id = ?", (task_id,))
-            for branch in sorted(branches, key=lambda item: (item.ordinal, item.branch_id)):
-                connection.execute(
+        connection.execute("DELETE FROM hypothesis_branches WHERE task_id = ?", (task_id,))
+        for branch in sorted(branches, key=lambda item: (item.ordinal, item.branch_id)):
+            connection.execute(
                     """INSERT INTO hypothesis_branches(
                         branch_id, task_id, parent_branch_id, hypothesis, mechanism_summary,
                         supporting_evidence_ids_json, opposing_evidence_ids_json, applicability,
@@ -726,7 +796,7 @@ class SQLiteStore:
                         branch.disposition,
                         branch.ordinal,
                     ),
-                )
+            )
 
     def list_hypothesis_branches(self, task_id: str) -> list[HypothesisBranch]:
         """Return the task's branch snapshot in stable ordinal order."""

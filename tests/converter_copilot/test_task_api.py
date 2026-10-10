@@ -218,9 +218,10 @@ def test_failed_workflow_status_and_events_remain_retrievable(tmp_path):
     with _client(tmp_path, deps=deps) as (client, _):
         task_id = client.post("/api/tasks", json=_fault_request()).json()["task"]["task_id"]
         task = _wait_for_terminal(client, task_id)
-        assert task["status"] == "failed"
+        assert task["status"] == "partial"
         events = client.get(f"/api/tasks/{task_id}/events").text
         assert '"status": "failed"' in events
+        assert '"stage": "agent:hypothesis_analyst"' in events
 
 
 def test_migration_failure_keeps_liveness_and_marks_readiness_unavailable(tmp_path, monkeypatch):
