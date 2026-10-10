@@ -27,6 +27,7 @@ describe("WorkspacePage", () => {
     vi.mocked(api.createTask).mockResolvedValue({ task: {
       task_id: "research-1", mode: "technical_research", status: "queued", inputs: {},
       created_at: "2026-10-10T00:00:00Z", updated_at: "2026-10-10T00:00:00Z",
+      attempt: 0, max_attempts: 3, lease_expires_at: null, error_code: null,
     } });
     render(<MemoryRouter><WorkspacePage /></MemoryRouter>);
     fireEvent.click(screen.getByRole("button", { name: "技术调研与实验设计" }));
@@ -40,6 +41,7 @@ describe("WorkspacePage", () => {
     vi.mocked(api.createTask).mockResolvedValue({ task: {
       task_id: "case-task-1", mode: "case_retrieval", status: "queued", inputs: {},
       created_at: "2026-10-10T00:00:00Z", updated_at: "2026-10-10T00:00:00Z",
+      attempt: 0, max_attempts: 3, lease_expires_at: null, error_code: null,
     } });
     render(<MemoryRouter><WorkspacePage /></MemoryRouter>);
     fireEvent.click(screen.getByRole("button", { name: "检修案例检索" }));
@@ -55,6 +57,7 @@ describe("WorkspacePage", () => {
       task: {
         task_id: "task-1", mode: "fault_analysis", status: "queued",
         inputs: {}, created_at: "2026-10-10T00:00:00Z", updated_at: "2026-10-10T00:00:00Z",
+        attempt: 0, max_attempts: 3, lease_expires_at: null, error_code: null,
       },
     });
     render(<MemoryRouter><WorkspacePage /></MemoryRouter>);

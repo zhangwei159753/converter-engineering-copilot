@@ -8,13 +8,19 @@ const stages = [
   { id: "complete", label: "报告整理" },
 ];
 
-export default function TaskProgress({ status, events }: { status: TaskStatus; events: TaskEvent[] }) {
+export default function TaskProgress({ status, events, attempt, maxAttempts }: {
+  status: TaskStatus;
+  events: TaskEvent[];
+  attempt: number;
+  maxAttempts: number;
+}) {
   const latest = events.at(-1);
   const terminal = ["completed", "partial", "failed"].includes(status);
   const activeIndex = status === "queued" ? 0 : status === "running" ? Math.max(1, stages.findIndex((stage) => stage.id === latest?.stage)) : 3;
   return (
     <div className="progress-panel">
       <div className="progress-heading"><div><span className="section-kicker">RUN / 实时执行</span><h2>任务进度</h2></div><span className={`status-pill ${status}`}><i />{status === "running" ? "执行中" : status === "queued" ? "排队中" : status === "failed" ? "失败" : status === "partial" ? "部分完成" : "已完成"}</span></div>
+      <div className="attempt-counter"><span>EXECUTION ATTEMPTS</span><strong>执行尝试 {attempt} / {maxAttempts}</strong></div>
       <div className="progress-track">
         {stages.map((stage, index) => {
           const done = terminal || index < activeIndex;

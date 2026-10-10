@@ -9,6 +9,10 @@ export interface TaskRecord {
   inputs: Record<string, unknown>;
   created_at: string;
   updated_at: string;
+  attempt: number;
+  max_attempts: number;
+  lease_expires_at: string | null;
+  error_code: string | null;
 }
 
 export interface TaskEvent {

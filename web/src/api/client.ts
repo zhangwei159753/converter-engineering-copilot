@@ -2,6 +2,10 @@ import type { CaseImportResult, ConverterReport, TaskAccepted, TaskEvent, TaskRe
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
+function newIdempotencyKey(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, init);
   if (!response.ok) {
@@ -20,7 +24,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export function createTask(payload: { mode: "fault_analysis" | "technical_research" | "case_retrieval"; inputs: object }): Promise<TaskAccepted> {
   return request<TaskAccepted>("/api/tasks", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "Idempotency-Key": newIdempotencyKey() },
     body: JSON.stringify(payload),
   });
 }
@@ -34,7 +38,10 @@ export function getTask(taskId: string): Promise<TaskRecord> {
 }
 
 export function retryTask(taskId: string): Promise<TaskAccepted> {
-  return request<TaskAccepted>(`/api/tasks/${encodeURIComponent(taskId)}/retry`, { method: "POST" });
+  return request<TaskAccepted>(`/api/tasks/${encodeURIComponent(taskId)}/retry`, {
+    method: "POST",
+    headers: { "Idempotency-Key": newIdempotencyKey() },
+  });
 }
 
 export function getReport(taskId: string): Promise<ConverterReport> {

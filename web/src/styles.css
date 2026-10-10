@@ -156,6 +156,9 @@ h1, h2, h3, p { margin-top: 0; }
 .progress-panel { background: var(--paper); border: 1px solid #dce2dd; border-radius: 8px; padding: 23px; box-shadow: 0 9px 30px #17313908; }
 .progress-heading { display: flex; justify-content: space-between; align-items: flex-start; }
 .progress-heading h2 { font-size: 17px; margin: 7px 0 0; }
+.attempt-counter { display: flex; justify-content: space-between; align-items: center; margin-top: 18px; padding: 9px 11px; border-left: 2px solid #d18a61; background: #f5f1e8; color: #72807d; }
+.attempt-counter span { font: 8px var(--mono); letter-spacing: .08em; }
+.attempt-counter strong { color: #38534f; font-size: 10px; font-weight: 600; }
 .status-pill, .completion-badge { display: inline-flex; align-items: center; gap: 6px; border-radius: 20px; padding: 6px 10px; font-size: 9px; color: #526d5d; background: #eaf2eb; }
 .status-pill i { width: 6px; height: 6px; border-radius: 50%; background: #72a080; }
 .status-pill.running { background: #f8eee5; color: #a65f3e; }.status-pill.running i { background: #d78558; }.status-pill.failed { color: #aa4d3c; background: #f8e9e5; }.status-pill.failed i { background: #bd634d; }
@@ -176,6 +179,7 @@ h1, h2, h3, p { margin-top: 0; }
 .event-marker { display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: #dc885f; }
 .empty-log { padding: 21px; font: 9px var(--mono); color: #809895; }
 .task-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 17px; }
+.failure-guidance { margin-top: 14px; }
 .loading-panel { min-height: 180px; display: flex; justify-content: center; align-items: center; gap: 10px; color: #869395; font-size: 12px; border: 1px dashed #d3dcd6; background: #f8f9f5; }
 
 .report-actions { display: flex; gap: 9px; align-items: center; }
