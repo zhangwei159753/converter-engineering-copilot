@@ -4,7 +4,7 @@ import sqlite3
 from collections.abc import Callable
 
 Migration = Callable[[sqlite3.Connection], None]
-CURRENT_SCHEMA_VERSION = 7
+CURRENT_SCHEMA_VERSION = 8
 
 
 def _create_base_schema(connection: sqlite3.Connection) -> None:
@@ -210,6 +210,93 @@ def _add_evaluation_output_context(connection: sqlite3.Connection) -> None:
         )
 
 
+def _add_agent_audit_and_memory(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """CREATE TABLE agent_runs (
+            agent_run_id TEXT PRIMARY KEY,
+            task_id TEXT NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE,
+            role TEXT NOT NULL CHECK(role IN (
+                'coordinator', 'evidence_researcher', 'hypothesis_analyst',
+                'evidence_auditor', 'report_synthesizer'
+            )),
+            stage TEXT NOT NULL,
+            status TEXT NOT NULL CHECK(status IN (
+                'queued', 'running', 'completed', 'failed', 'skipped', 'incomplete'
+            )),
+            parent_run_id TEXT REFERENCES agent_runs(agent_run_id) ON DELETE SET NULL,
+            branch_id TEXT,
+            input_refs_json TEXT NOT NULL,
+            output_refs_json TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            error_code TEXT,
+            retry_count INTEGER NOT NULL CHECK(retry_count >= 0),
+            started_at TEXT NOT NULL,
+            completed_at TEXT,
+            provider_usage_json TEXT
+        )"""
+    )
+    connection.execute("CREATE INDEX idx_agent_runs_task_started ON agent_runs(task_id, started_at, agent_run_id)")
+    connection.execute(
+        """CREATE TABLE hypothesis_branches (
+            branch_id TEXT PRIMARY KEY,
+            task_id TEXT NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE,
+            parent_branch_id TEXT,
+            hypothesis TEXT NOT NULL,
+            mechanism_summary TEXT NOT NULL,
+            supporting_evidence_ids_json TEXT NOT NULL,
+            opposing_evidence_ids_json TEXT NOT NULL,
+            applicability TEXT NOT NULL CHECK(applicability IN ('direct', 'related', 'cross_equipment', 'unknown')),
+            missing_fields_json TEXT NOT NULL,
+            checks_json TEXT NOT NULL,
+            gate_status TEXT NOT NULL CHECK(gate_status IN ('pending', 'qualified', 'blocked', 'review_incomplete')),
+            disposition TEXT NOT NULL CHECK(disposition IN ('retained', 'omitted', 'needs_more_information')),
+            ordinal INTEGER NOT NULL CHECK(ordinal BETWEEN 0 AND 2),
+            UNIQUE(task_id, ordinal),
+            UNIQUE(task_id, branch_id),
+            FOREIGN KEY(task_id, parent_branch_id)
+                REFERENCES hypothesis_branches(task_id, branch_id) ON DELETE CASCADE
+        )"""
+    )
+    connection.execute("CREATE INDEX idx_hypothesis_branches_task ON hypothesis_branches(task_id, ordinal, branch_id)")
+    connection.execute(
+        """CREATE TABLE memory_nodes (
+            node_id TEXT PRIMARY KEY,
+            node_type TEXT NOT NULL CHECK(node_type IN ('equipment', 'symptom', 'condition', 'cause', 'work_order', 'evidence')),
+            canonical_key TEXT NOT NULL,
+            display_name TEXT NOT NULL,
+            synthetic_demo INTEGER NOT NULL CHECK(synthetic_demo IN (0, 1)),
+            UNIQUE(node_type, canonical_key)
+        )"""
+    )
+    connection.execute("CREATE INDEX idx_memory_nodes_canonical ON memory_nodes(node_type, canonical_key)")
+    connection.execute(
+        """CREATE TABLE memory_edges (
+            edge_id TEXT PRIMARY KEY,
+            source_node_id TEXT NOT NULL REFERENCES memory_nodes(node_id) ON DELETE CASCADE,
+            relation_type TEXT NOT NULL CHECK(relation_type IN (
+                'has_symptom', 'occurred_under', 'associated_with_cause',
+                'belongs_to_work_order', 'supported_by'
+            )),
+            target_node_id TEXT NOT NULL REFERENCES memory_nodes(node_id) ON DELETE CASCADE,
+            source_task_id TEXT NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE,
+            source_work_order_id TEXT NOT NULL,
+            source_review_version INTEGER NOT NULL CHECK(source_review_version > 0),
+            evidence_ids_json TEXT NOT NULL,
+            synthetic_demo INTEGER NOT NULL CHECK(synthetic_demo = 0),
+            active INTEGER NOT NULL CHECK(active IN (0, 1)),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(source_task_id, source_review_version, source_node_id, relation_type, target_node_id),
+            FOREIGN KEY(source_work_order_id, source_task_id, source_review_version)
+                REFERENCES work_order_review_events(work_order_id, task_id, version) ON DELETE CASCADE
+        )"""
+    )
+    connection.execute(
+        "CREATE INDEX idx_memory_edges_active_source ON memory_edges(active, source_work_order_id, source_task_id, source_review_version)"
+    )
+    connection.execute("CREATE INDEX idx_memory_edges_target ON memory_edges(target_node_id, relation_type)")
+
+
 MIGRATIONS: list[tuple[int, Migration]] = [
     (1, _create_base_schema),
     (2, _add_task_lifecycle_columns),
@@ -218,6 +305,7 @@ MIGRATIONS: list[tuple[int, Migration]] = [
     (5, _add_evaluation_reviews),
     (6, _add_work_order_reviews),
     (7, _add_evaluation_output_context),
+    (8, _add_agent_audit_and_memory),
 ]
 
 

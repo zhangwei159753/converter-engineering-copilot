@@ -47,7 +47,7 @@
 - `MemoryNode`: stable `node_id`, controlled `node_type`, `canonical_key`, `display_name`, `synthetic_demo`.
 - `MemoryEdge`: stable `edge_id`, `source_node_id`, controlled `relation_type`, `target_node_id`, source task/work-order/review version, `evidence_ids`, `synthetic_demo`, `active`, timestamps.
 - Increment SQLite schema to version 8. Add `agent_runs`, `hypothesis_branches`, `memory_nodes`, and `memory_edges` with task/source foreign keys, controlled status/type checks, unique stable IDs, and indexes by task, branch, canonical key, and source review.
-- `SQLiteStore.save_agent_run(record)`, `list_agent_runs(task_id)`, `replace_hypothesis_branches(task_id, branches)`, `list_hypothesis_branches(task_id)`, and `list_memory_edges(...)` return typed records and use parameterized SQL.
+- `SQLiteStore.save_agent_run(record)`, `list_agent_runs(task_id)`, `replace_hypothesis_branches(task_id, branches)`, `list_hypothesis_branches(task_id)`, `upsert_memory_graph(nodes, edges)`, and `list_memory_edges(...)` return typed records and use parameterized SQL.
 
 - [ ] **Step 1: Write failing store contract tests** for record round-trip, stable ordering, invalid task FK, migration from schema 7, and duplicate branch/edge IDs.
 - [ ] **Step 2: Run the targeted tests and confirm the new contract is missing.**

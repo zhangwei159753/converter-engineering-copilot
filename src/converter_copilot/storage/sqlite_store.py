@@ -7,6 +7,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
+from converter_copilot.domain.agent_audit import (
+    AgentRunRecord,
+    HypothesisBranch,
+    MemoryEdge,
+    MemoryNode,
+)
 from converter_copilot.domain.schemas import (
     CaseRecord,
     ConverterReport,
@@ -619,6 +625,224 @@ class SQLiteStore:
                 (task_id, after_id),
             ).fetchall()
         return [TaskEvent.model_validate(dict(row)) for row in rows]
+
+    def save_agent_run(self, record: AgentRunRecord) -> None:
+        """Insert or update one task-scoped role execution without raw prompts."""
+        with self._connect() as connection:
+            existing = connection.execute(
+                "SELECT task_id FROM agent_runs WHERE agent_run_id = ?", (record.agent_run_id,)
+            ).fetchone()
+            if existing is not None and existing["task_id"] != record.task_id:
+                raise ValueError("Agent run ID is already assigned to another task.")
+            connection.execute(
+                """INSERT INTO agent_runs(
+                    agent_run_id, task_id, role, stage, status, parent_run_id, branch_id,
+                    input_refs_json, output_refs_json, summary, error_code, retry_count,
+                    started_at, completed_at, provider_usage_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(agent_run_id) DO UPDATE SET
+                    role=excluded.role, stage=excluded.stage, status=excluded.status,
+                    parent_run_id=excluded.parent_run_id, branch_id=excluded.branch_id,
+                    input_refs_json=excluded.input_refs_json, output_refs_json=excluded.output_refs_json,
+                    summary=excluded.summary, error_code=excluded.error_code,
+                    retry_count=excluded.retry_count, started_at=excluded.started_at,
+                    completed_at=excluded.completed_at, provider_usage_json=excluded.provider_usage_json""",
+                (
+                    record.agent_run_id,
+                    record.task_id,
+                    record.role,
+                    record.stage,
+                    record.status,
+                    record.parent_run_id,
+                    record.branch_id,
+                    json.dumps(record.input_refs, ensure_ascii=False),
+                    json.dumps(record.output_refs, ensure_ascii=False),
+                    record.summary,
+                    record.error_code,
+                    record.retry_count,
+                    record.started_at.isoformat(),
+                    record.completed_at.isoformat() if record.completed_at else None,
+                    json.dumps(record.provider_usage, ensure_ascii=False) if record.provider_usage is not None else None,
+                ),
+            )
+
+    def list_agent_runs(self, task_id: str) -> list[AgentRunRecord]:
+        """List role executions in stable start-time order."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM agent_runs WHERE task_id = ? ORDER BY started_at, agent_run_id", (task_id,)
+            ).fetchall()
+        return [
+            AgentRunRecord(
+                agent_run_id=row["agent_run_id"],
+                task_id=row["task_id"],
+                role=row["role"],
+                stage=row["stage"],
+                status=row["status"],
+                parent_run_id=row["parent_run_id"],
+                branch_id=row["branch_id"],
+                input_refs=json.loads(row["input_refs_json"]),
+                output_refs=json.loads(row["output_refs_json"]),
+                summary=row["summary"],
+                error_code=row["error_code"],
+                retry_count=row["retry_count"],
+                started_at=row["started_at"],
+                completed_at=row["completed_at"],
+                provider_usage=json.loads(row["provider_usage_json"]) if row["provider_usage_json"] else None,
+            )
+            for row in rows
+        ]
+
+    def replace_hypothesis_branches(self, task_id: str, branches: list[HypothesisBranch]) -> None:
+        """Replace a task's bounded branch snapshot atomically."""
+        ids = [branch.branch_id for branch in branches]
+        ordinals = [branch.ordinal for branch in branches]
+        if len(ids) != len(set(ids)) or len(ordinals) != len(set(ordinals)):
+            raise ValueError("Hypothesis branches must have unique IDs and ordinals; duplicate found.")
+        if any(branch.task_id != task_id for branch in branches):
+            raise ValueError("All hypothesis branches must belong to the target task.")
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute("DELETE FROM hypothesis_branches WHERE task_id = ?", (task_id,))
+            for branch in sorted(branches, key=lambda item: (item.ordinal, item.branch_id)):
+                connection.execute(
+                    """INSERT INTO hypothesis_branches(
+                        branch_id, task_id, parent_branch_id, hypothesis, mechanism_summary,
+                        supporting_evidence_ids_json, opposing_evidence_ids_json, applicability,
+                        missing_fields_json, checks_json, gate_status, disposition, ordinal
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        branch.branch_id,
+                        branch.task_id,
+                        branch.parent_branch_id,
+                        branch.hypothesis,
+                        branch.mechanism_summary,
+                        json.dumps(branch.supporting_evidence_ids, ensure_ascii=False),
+                        json.dumps(branch.opposing_evidence_ids, ensure_ascii=False),
+                        branch.applicability,
+                        json.dumps(branch.missing_fields, ensure_ascii=False),
+                        json.dumps(branch.checks, ensure_ascii=False),
+                        branch.gate_status,
+                        branch.disposition,
+                        branch.ordinal,
+                    ),
+                )
+
+    def list_hypothesis_branches(self, task_id: str) -> list[HypothesisBranch]:
+        """Return the task's branch snapshot in stable ordinal order."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM hypothesis_branches WHERE task_id = ? ORDER BY ordinal, branch_id", (task_id,)
+            ).fetchall()
+        return [
+            HypothesisBranch(
+                branch_id=row["branch_id"],
+                task_id=row["task_id"],
+                parent_branch_id=row["parent_branch_id"],
+                hypothesis=row["hypothesis"],
+                mechanism_summary=row["mechanism_summary"],
+                supporting_evidence_ids=json.loads(row["supporting_evidence_ids_json"]),
+                opposing_evidence_ids=json.loads(row["opposing_evidence_ids_json"]),
+                applicability=row["applicability"],
+                missing_fields=json.loads(row["missing_fields_json"]),
+                checks=json.loads(row["checks_json"]),
+                gate_status=row["gate_status"],
+                disposition=row["disposition"],
+                ordinal=row["ordinal"],
+            )
+            for row in rows
+        ]
+
+    def upsert_memory_graph(self, nodes: list[MemoryNode], edges: list[MemoryEdge]) -> None:
+        """Persist non-synthetic graph facts only for accepted, linked reviews."""
+        if len({node.node_id for node in nodes}) != len(nodes):
+            raise ValueError("Memory node IDs must be unique within a graph update.")
+        if len({edge.edge_id for edge in edges}) != len(edges):
+            raise ValueError("Memory edge IDs must be unique within a graph update.")
+        if any(node.synthetic_demo for node in nodes):
+            raise ValueError("Synthetic demo records cannot be promoted into reusable memory.")
+        now = _now().isoformat()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            for edge in edges:
+                if edge.synthetic_demo:
+                    raise ValueError("Synthetic demo records cannot be promoted into reusable memory.")
+                review = connection.execute(
+                    """SELECT verdict FROM work_order_review_events
+                    WHERE work_order_id = ? AND task_id = ? AND version = ?""",
+                    (edge.source_work_order_id, edge.source_task_id, edge.source_review_version),
+                ).fetchone()
+                if review is None or review["verdict"] != "accepted":
+                    raise ValueError("Reusable memory requires a linked accepted work-order review.")
+            for node in nodes:
+                existing = connection.execute(
+                    "SELECT node_type, canonical_key FROM memory_nodes WHERE node_id = ?", (node.node_id,)
+                ).fetchone()
+                if existing is not None and (existing["node_type"], existing["canonical_key"]) != (
+                    node.node_type,
+                    node.canonical_key,
+                ):
+                    raise ValueError("Memory node ID cannot be reused for a different canonical entity.")
+                connection.execute(
+                    """INSERT INTO memory_nodes(node_id, node_type, canonical_key, display_name, synthetic_demo)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(node_id) DO UPDATE SET display_name=excluded.display_name""",
+                    (node.node_id, node.node_type, node.canonical_key, node.display_name, int(node.synthetic_demo)),
+                )
+            for edge in edges:
+                connection.execute(
+                    """INSERT INTO memory_edges(
+                        edge_id, source_node_id, relation_type, target_node_id,
+                        source_task_id, source_work_order_id, source_review_version,
+                        evidence_ids_json, synthetic_demo, active, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(edge_id) DO UPDATE SET
+                        evidence_ids_json=excluded.evidence_ids_json, active=excluded.active,
+                        updated_at=excluded.updated_at
+                    WHERE memory_edges.source_task_id=excluded.source_task_id
+                      AND memory_edges.source_work_order_id=excluded.source_work_order_id
+                      AND memory_edges.source_review_version=excluded.source_review_version""",
+                    (
+                        edge.edge_id,
+                        edge.source_node_id,
+                        edge.relation_type,
+                        edge.target_node_id,
+                        edge.source_task_id,
+                        edge.source_work_order_id,
+                        edge.source_review_version,
+                        json.dumps(edge.evidence_ids, ensure_ascii=False),
+                        int(edge.synthetic_demo),
+                        int(edge.active),
+                        edge.created_at.isoformat() if edge.created_at else now,
+                        edge.updated_at.isoformat() if edge.updated_at else now,
+                    ),
+                )
+
+    def list_memory_edges(self, *, active_only: bool = True) -> list[MemoryEdge]:
+        """List source-linked memory edges in deterministic order."""
+        query = "SELECT * FROM memory_edges"
+        if active_only:
+            query += " WHERE active = 1"
+        query += " ORDER BY source_work_order_id, source_task_id, source_review_version, edge_id"
+        with self._connect() as connection:
+            rows = connection.execute(query).fetchall()
+        return [
+            MemoryEdge(
+                edge_id=row["edge_id"],
+                source_node_id=row["source_node_id"],
+                relation_type=row["relation_type"],
+                target_node_id=row["target_node_id"],
+                source_task_id=row["source_task_id"],
+                source_work_order_id=row["source_work_order_id"],
+                source_review_version=row["source_review_version"],
+                evidence_ids=json.loads(row["evidence_ids_json"]),
+                synthetic_demo=bool(row["synthetic_demo"]),
+                active=bool(row["active"]),
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+            )
+            for row in rows
+        ]
 
     def save_report(self, report: ConverterReport) -> None:
         """Insert or replace the report associated with one task."""
