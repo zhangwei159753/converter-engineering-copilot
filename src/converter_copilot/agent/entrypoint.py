@@ -2,11 +2,11 @@
 
 import os
 
-from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from langchain_tavily import TavilySearch
 
 from converter_copilot.agent.workflows import WorkflowDeps, build_workflow
+from converter_copilot.config import RuntimeConfig
 from converter_copilot.domain.schemas import TaskMode
 from converter_copilot.retrieval.vector_index import VectorIndex
 
@@ -32,13 +32,14 @@ class EmptySearchAdapter:
 
 def build_default_deps(config: dict | None = None) -> WorkflowDeps:
     """Create production dependencies from server environment or explicit config."""
-    load_dotenv()
+    runtime = RuntimeConfig.from_env()
     config = config or {}
-    api_key = config.get("openai_api_key") or os.getenv("OPENAI_API_KEY")
+    api_key = config.get("openai_api_key") or runtime.openai_api_key
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY is required to run a converter workflow.")
+    runtime.apply_tracing_environment()
     model = ChatOpenAI(
-        model=config.get("model") or os.getenv("CONVERTER_MODEL", "gpt-4.1-mini"),
+        model=config.get("model") or runtime.model,
         temperature=0,
         api_key=api_key,
     )

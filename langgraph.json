@@ -2,7 +2,7 @@
     "dockerfile_lines": [],
     "graphs": {
       "Deep Researcher": "./src/open_deep_research/deep_researcher.py:deep_researcher",
-      "Converter Copilot": "./src/converter_copilot/agent/entrypoint.py:converter_copilot"
+      "Converter Copilot": "./src/converter_copilot/agent/entrypoint.py:build_converter_copilot"
     },
     "python_version": "3.11",
     "env": "./.env",

@@ -1,0 +1,2 @@
+{"example_id":"research-current-sensing-01","annotation_status":"starter_unlabeled","inputs":{"question":"比较并网变流器电流传感器零点偏移的常见诊断方法及其局限","scope":"工程技术资料与可复现实验方法","comparison_dimensions":["测量方法","适用工况","误差来源"]},"expected_retrieval_ids":[],"manual_evidence_labels":["unverified"]}
+{"example_id":"research-cooling-diagnostics-02","annotation_status":"starter_unlabeled","inputs":{"question":"梳理功率变流器液冷回路流量不足的诊断指标和验证步骤","scope":"变流器维护与实验设计","comparison_dimensions":["监测量","故障判据","复测步骤"]},"expected_retrieval_ids":[],"manual_evidence_labels":["unverified"]}

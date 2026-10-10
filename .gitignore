@@ -64,6 +64,9 @@ node_modules/
 # LangGraph specific
 .langgraph/
 
+# Local task data, vector indexes, and evaluation output
+.data/
+
 # Temporary files
 tmp/
 temp/
