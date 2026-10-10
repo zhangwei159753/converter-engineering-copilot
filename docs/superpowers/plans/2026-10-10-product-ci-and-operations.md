@@ -64,11 +64,11 @@
 - Modify: `web/package.json` only if a stable non-watch test script is needed
 - Test: existing `web/src/**/*.test.tsx`
 
-- [ ] Add CI steps `npm ci`, `npm test -- --run`, and `npm run build` from `web/`.
-- [ ] Add Docker build job using the repository `Dockerfile`; ensure `.env`, `.data`, and `web/node_modules` are excluded from the build context.
-- [ ] Run `npm --prefix web test -- --run` and `npm --prefix web run build`; expected: frontend tests and typechecked production build pass.
-- [ ] Run the same Docker build command locally if Docker is available; expected: image build succeeds without provider secrets and does not start/deploy containers.
-- [ ] Commit as `ci: build web app and docker image`.
+- [x] Add CI steps `npm ci`, `npm test -- --run`, and `npm run build` from `web/`.
+- [x] Add Docker build job using the repository `Dockerfile`; ensure `.env`, `.data`, and `web/node_modules` are excluded from the build context.
+- [x] Run `npm --prefix web test -- --run` and `npm --prefix web run build`; expected: frontend tests and typechecked production build pass.
+- [x] Run the same Docker build command locally if Docker is available; expected: image build succeeds without provider secrets and does not start/deploy containers. The CLI is installed, but the local Docker Desktop Linux engine pipe is unavailable; the workflow will build both images in CI.
+- [x] Commit as `ci: build web app and docker image`.
 
 ### Task 4: Publish local operations and project roadmap
 
