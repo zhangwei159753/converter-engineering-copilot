@@ -15,9 +15,11 @@ class TavilySearchAdapter:
     """Adapt Tavily's tool result shape for workflow source normalization."""
 
     def __init__(self):
+        """Initialize the configured Tavily search tool."""
         self._tool = TavilySearch(max_results=5, search_depth="advanced", tavily_api_key=os.getenv("TAVILY_API_KEY"))
 
     def search(self, query: str, *, limit: int = 5):
+        """Search web sources and normalize Tavily's result collection."""
         result = self._tool.invoke({"query": query})
         results = result if isinstance(result, list) else result.get("results", [])
         return results[:limit]
@@ -27,6 +29,7 @@ class EmptySearchAdapter:
     """No-op external retrieval when the optional Tavily key is not configured."""
 
     def search(self, query: str, *, limit: int = 5):
+        """Return no web results when external search is not configured."""
         return []
 
 
@@ -34,6 +37,7 @@ class DeepSeekChatOpenAI(ChatOpenAI):
     """Configure LangChain's structured responses for DeepSeek tool calling."""
 
     def with_structured_output(self, schema=None, *, method="function_calling", **kwargs):
+        """Bind a schema using DeepSeek's supported function-calling method."""
         return super().with_structured_output(schema, method=method, **kwargs)
 
 

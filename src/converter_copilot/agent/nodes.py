@@ -3,21 +3,25 @@
 import asyncio
 import hashlib
 import inspect
-from difflib import SequenceMatcher
 from datetime import datetime, timezone
+from difflib import SequenceMatcher
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from converter_copilot.agent.prompts import FAULT_ANALYSIS_SYSTEM, TECHNICAL_RESEARCH_SYSTEM, format_research_prompt
+from converter_copilot.agent.prompts import (
+    FAULT_ANALYSIS_SYSTEM,
+    TECHNICAL_RESEARCH_SYSTEM,
+    format_research_prompt,
+)
 from converter_copilot.agent.state import ConverterState
 from converter_copilot.domain.evidence import validate_report_evidence
 from converter_copilot.domain.schemas import (
-    Claim,
     CaseMatch,
     CaseRecord,
     CaseRetrievalInput,
     CaseRetrievalReport,
+    Claim,
     ConverterReport,
     Evidence,
     FaultAnalysisInput,
@@ -423,7 +427,7 @@ def _web_evidence(item: Any, task_id: str) -> Evidence:
     payload = item if isinstance(item, dict) else {"content": str(item)}
     url = payload.get("url")
     excerpt = payload.get("content") or payload.get("raw_content") or ""
-    evidence_id = "web-" + hashlib.sha256(f"{url}|{excerpt}".encode("utf-8")).hexdigest()[:16]
+    evidence_id = "web-" + hashlib.sha256(f"{url}|{excerpt}".encode()).hexdigest()[:16]
     return Evidence(
         evidence_id=evidence_id,
         task_id=task_id,

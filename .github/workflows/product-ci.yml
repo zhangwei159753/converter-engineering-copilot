@@ -1,0 +1,86 @@
+name: Product CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Deterministic Python product checks
+    runs-on: ubuntu-latest
+    env:
+      DEEPSEEK_API_KEY: ""
+      TAVILY_API_KEY: ""
+      LANGSMITH_API_KEY: ""
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --locked --extra dev
+      - run: uv run ruff check src/converter_copilot tests/converter_copilot
+      - run: uv run pytest tests/converter_copilot -q
+
+  legacy-discovery:
+    name: Legacy collection (live evaluations not run)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --locked --extra dev
+      - name: Collect legacy tests; do not run credentialed evaluations
+        run: uv run pytest --collect-only -q src/legacy/tests --research-agent=multi_agent
+      - name: Record live integration evaluation status
+        run: echo "Live Anthropic, Tavily, and LangSmith evaluations are not run in normal CI."
+
+  frontend:
+    name: Web tests and production build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm test -- --run
+      - run: npm run build
+
+  docker-image:
+    name: Build local application images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build API image without provider credentials
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          target: api
+          push: false
+          tags: converter-engineering-copilot-api:ci
+      - name: Build web image without provider credentials
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          target: web
+          push: false
+          tags: converter-engineering-copilot-web:ci

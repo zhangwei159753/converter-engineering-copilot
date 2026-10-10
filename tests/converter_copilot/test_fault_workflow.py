@@ -1,3 +1,5 @@
+import asyncio
+
 from converter_copilot.agent.workflows import WorkflowDeps, build_workflow
 from converter_copilot.domain.schemas import (
     Evidence,
@@ -137,5 +139,4 @@ def test_conflicting_web_source_marks_generated_claim_conflicting():
     state = asyncio.run(graph.ainvoke(_state()))
     assert state["report"].claims[0].verification_status == "conflicting"
     assert state["report"].completion_status == "partial"
-import asyncio
 

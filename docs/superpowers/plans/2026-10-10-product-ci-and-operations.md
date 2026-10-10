@@ -49,12 +49,12 @@
 - Modify: `pyproject.toml`
 - Modify: `uv.lock` only if the chosen CI command requires a declared dev dependency
 
-- [ ] Add workflow jobs for Python setup, `uv sync --locked --extra dev`, Ruff checks on product files, product tests, and a separate legacy collection/live-evaluation status. Normal CI collects legacy tests but marks the live Anthropic/Tavily/LangSmith evaluation as not run because credentials are not configured; it does not count collection as a pass of that test.
-- [ ] Add workflow guard test or YAML review assertion that the product job runs with provider keys unset and invokes no live evaluation command.
-- [ ] Run local equivalents `uv run ruff check src/converter_copilot tests/converter_copilot` and `uv run pytest tests/converter_copilot -q`; expected: existing product checks establish the workflow command contract.
-- [ ] Configure GitHub Actions to run those commands on pull requests and pushes to the repository default branch; never use a secret fallback or skip product tests when a model key is absent. Do not require model-provider secrets in CI.
-- [ ] Validate workflow YAML and command paths locally; expected: CI invokes only declared project scripts and deterministic tests.
-- [ ] Commit as `ci: add deterministic python product checks`.
+- [x] Add workflow jobs for Python setup, `uv sync --locked --extra dev`, Ruff checks on product files, product tests, and a separate legacy collection/live-evaluation status. Normal CI collects legacy tests but marks the live Anthropic/Tavily/LangSmith evaluation as not run because credentials are not configured; it does not count collection as a pass of that test.
+- [x] Add workflow guard test or YAML review assertion that the product job runs with provider keys unset and invokes no live evaluation command.
+- [x] Run local equivalents `uv run ruff check src/converter_copilot tests/converter_copilot` and `uv run pytest tests/converter_copilot -q`; expected: existing product checks establish the workflow command contract.
+- [x] Configure GitHub Actions to run those commands on pull requests and pushes to the repository default branch; never use a secret fallback or skip product tests when a model key is absent. Do not require model-provider secrets in CI.
+- [x] Validate workflow YAML and command paths locally; expected: CI invokes only declared project scripts and deterministic tests.
+- [x] Commit as `ci: add deterministic python product checks`.
 
 ### Task 3: Add frontend tests/build and Docker image build
 

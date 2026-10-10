@@ -7,8 +7,8 @@ from langchain_core.language_models import BaseChatModel
 from langgraph.graph import END, START, StateGraph
 
 from converter_copilot.agent.nodes import (
-    make_clarification_node,
     make_case_retrieval_node,
+    make_clarification_node,
     make_generate_node,
     make_intake_node,
     make_research_node,
@@ -22,13 +22,17 @@ from converter_copilot.domain.schemas import TaskMode
 class SearchAdapter(Protocol):
     """Web or external-source search adapter consumed by graph nodes."""
 
-    def search(self, query: str, *, limit: int = 5): ...
+    def search(self, query: str, *, limit: int = 5):
+        """Return up to the requested number of external source results."""
+        ...
 
 
 class VectorSearch(Protocol):
     """Local vector index interface consumed by graph nodes."""
 
-    def search(self, query: str, *, limit: int = 5, filters: dict[str, str] | None = None): ...
+    def search(self, query: str, *, limit: int = 5, filters: dict[str, str] | None = None):
+        """Search local vectors with optional metadata filters."""
+        ...
 
 
 @dataclass
