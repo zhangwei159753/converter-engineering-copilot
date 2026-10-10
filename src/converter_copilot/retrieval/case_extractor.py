@@ -1,5 +1,6 @@
 """Structured extraction of maintenance-case fields from cited source text."""
 
+import hashlib
 from uuid import uuid4
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -25,7 +26,13 @@ class CaseExtractionBatch(BaseModel):
     cases: list[ExtractedCase] = Field(default_factory=list)
 
 
-async def extract_case_records(text: str, *, evidence_id: str, model) -> list[CaseRecord]:
+async def extract_case_records(
+    text: str,
+    *,
+    evidence_id: str,
+    model,
+    import_id: str | None = None,
+) -> list[CaseRecord]:
     """Extract only explicit service cases and attach the source evidence ID."""
     structured_model = model.with_structured_output(CaseExtractionBatch)
     response = await structured_model.ainvoke(
@@ -42,12 +49,17 @@ async def extract_case_records(text: str, *, evidence_id: str, model) -> list[Ca
     )
     batch = CaseExtractionBatch.model_validate(response)
     records = []
-    for item in batch.cases:
+    for index, item in enumerate(batch.cases, start=1):
         if not item.symptom or not item.symptom.strip():
             continue
+        case_id = (
+            f"case-{hashlib.sha256(f'{import_id}:{evidence_id}:{index}'.encode()).hexdigest()[:24]}"
+            if import_id
+            else f"case-{uuid4().hex[:12]}"
+        )
         records.append(
             CaseRecord(
-                case_id=f"case-{uuid4().hex[:12]}",
+                case_id=case_id,
                 equipment_type=item.equipment_type,
                 operating_conditions=item.operating_conditions,
                 symptom=item.symptom.strip(),

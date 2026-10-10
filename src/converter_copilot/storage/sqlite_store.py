@@ -250,6 +250,24 @@ class SQLiteStore:
             row = connection.execute("SELECT * FROM imports WHERE import_id = ?", (import_id,)).fetchone()
         return self._import_from_row(row) if row else None
 
+    def list_import_records(self) -> list[ImportRecord]:
+        """Return all import records in creation order, excluding deleted entries."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM imports WHERE status != 'deleted' ORDER BY created_at, import_id"
+            ).fetchall()
+        return [self._import_from_row(row) for row in rows]
+
+    def list_incomplete_imports(self) -> list[ImportRecord]:
+        """Return imports that need replay, repair, or deletion completion."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                """SELECT * FROM imports WHERE status IN
+                ('validated', 'indexing', 'failed', 'needs_repair', 'deleting')
+                ORDER BY created_at, import_id"""
+            ).fetchall()
+        return [self._import_from_row(row) for row in rows]
+
     def update_import_status(
         self,
         import_id: str,
@@ -298,6 +316,50 @@ class SQLiteStore:
                 VALUES (?, ?, ?)""",
                 [(import_id, case.case_id, case.model_dump_json()) for case in candidates],
             )
+            connection.execute(
+                "UPDATE imports SET case_candidates_ready = 1, updated_at = ? WHERE import_id = ?",
+                (_now().isoformat(), import_id),
+            )
+
+    def get_import_chunk_ids(self, import_id: str) -> list[str]:
+        """Return exact vector IDs associated with an import."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT chunk_id FROM import_chunks WHERE import_id = ? ORDER BY chunk_id", (import_id,)
+            ).fetchall()
+        return [row["chunk_id"] for row in rows]
+
+    def import_case_data_consistent(self, import_id: str) -> bool:
+        """Check that each saved candidate has one live imported case link."""
+        with self._connect() as connection:
+            candidates = {
+                row["case_id"] for row in connection.execute(
+                    "SELECT case_id FROM import_case_candidates WHERE import_id = ?", (import_id,)
+                ).fetchall()
+            }
+            linked = {
+                row["case_id"] for row in connection.execute(
+                    """SELECT ic.case_id FROM import_cases ic JOIN cases c ON c.case_id = ic.case_id
+                    WHERE ic.import_id = ?""",
+                    (import_id,),
+                ).fetchall()
+            }
+        return candidates == linked
+
+    def delete_import_case_data(self, import_id: str) -> None:
+        """Delete cases and extracted candidate text owned by an import."""
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                "DELETE FROM cases WHERE case_id IN (SELECT case_id FROM import_cases WHERE import_id = ?)",
+                (import_id,),
+            )
+            connection.execute("DELETE FROM import_case_candidates WHERE import_id = ?", (import_id,))
+
+    def clear_import_chunk_links(self, import_id: str) -> None:
+        """Remove vector identity metadata after external vector deletion succeeds."""
+        with self._connect() as connection:
+            connection.execute("DELETE FROM import_chunks WHERE import_id = ?", (import_id,))
 
     def get_import_case_candidates(self, import_id: str) -> list[CaseRecord]:
         """Return saved case-extraction candidates in deterministic order."""
@@ -603,6 +665,7 @@ class SQLiteStore:
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             error_code=row["error_code"],
+            case_candidates_ready=bool(row["case_candidates_ready"]),
         )
 
     @staticmethod

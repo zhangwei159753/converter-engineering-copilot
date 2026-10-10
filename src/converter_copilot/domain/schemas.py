@@ -190,6 +190,18 @@ class ImportRecord(BaseModel):
     created_at: datetime
     updated_at: datetime
     error_code: str | None = None
+    case_candidates_ready: bool = False
+
+
+class ImportRepairResult(BaseModel):
+    """Safe result of replaying or inspecting one durable source import."""
+
+    import_id: str
+    status: ImportStatus
+    expected_chunk_count: int
+    indexed_chunks: int
+    imported_cases: int
+    error_code: str | None = None
 
 
 _INPUT_MODELS = {

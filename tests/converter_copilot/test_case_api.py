@@ -14,12 +14,21 @@ class EmptySearch:
 class CaptureIndex:
     def __init__(self):
         self.added = []
+        self.chunks = {}
 
     def search(self, query, *, limit=5, filters=None):
         return []
 
     def add(self, chunks):
         self.added.extend(chunks)
+        self.chunks.update({chunk.chunk_id: chunk for chunk in chunks})
+
+    def contains_chunks(self, chunk_ids):
+        return set(chunk_ids) <= self.chunks.keys()
+
+    def delete_chunks(self, chunk_ids):
+        for chunk_id in chunk_ids:
+            self.chunks.pop(chunk_id, None)
 
 
 class NeverModel:
@@ -58,6 +67,55 @@ def test_identical_csv_upload_reuses_import_case_and_vector_identity(tmp_path):
     assert first.status_code == second.status_code == 201
     assert first.json()["document_ids"] == second.json()["document_ids"]
     assert len(index.added) == 1
+    assert len(store.list_cases()) == 1
+
+
+def test_import_api_hides_source_path_and_delete_removes_imported_artifacts(tmp_path):
+    client, store, index = _client(tmp_path)
+    response = client.post(
+        "/api/cases/import",
+        files={"file": ("cases.csv", "symptom\nDC overvoltage\n", "text/csv")},
+    )
+    assert response.status_code == 201
+    import_id = store.list_import_records()[0].import_id
+
+    listed = client.get("/api/imports")
+    assert listed.status_code == 200
+    assert listed.json()[0]["import_id"] == import_id
+    assert "source_path" not in listed.text
+    assert store.get_import(import_id).source_path not in listed.text
+
+    deleted = client.delete(f"/api/imports/{import_id}")
+    assert deleted.status_code == 200
+    assert deleted.json()["status"] == "deleted"
+    assert store.list_cases() == []
+    assert index.contains_chunks([])
+    assert client.get(f"/api/imports/{import_id}").status_code == 404
+
+
+def test_import_repair_endpoint_replays_interrupted_vector_write(tmp_path, monkeypatch):
+    client, store, index = _client(tmp_path)
+    original_add = index.add
+    fail_once = True
+
+    def fail_first_add(chunks):
+        nonlocal fail_once
+        if fail_once:
+            fail_once = False
+            raise RuntimeError("injected failure")
+        original_add(chunks)
+
+    monkeypatch.setattr(index, "add", fail_first_add)
+    response = client.post(
+        "/api/cases/import",
+        files={"file": ("repair.csv", "symptom\nDC overvoltage\n", "text/csv")},
+    )
+    assert response.status_code == 503
+    import_id = store.list_import_records()[0].import_id
+
+    repaired = client.post(f"/api/imports/{import_id}/repair")
+    assert repaired.status_code == 200
+    assert repaired.json()["status"] == "complete"
     assert len(store.list_cases()) == 1
 
 

@@ -5,7 +5,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
-from converter_copilot.api.models import CaseImportResult
+from converter_copilot.api.models import CaseImportResult, ImportSummary
 from converter_copilot.api.runner import TaskRunner
 from converter_copilot.config import ImportLimits, import_source_directory
 from converter_copilot.domain.schemas import CaseRecord, ImportStatus
@@ -136,5 +136,60 @@ def build_case_router(runner: TaskRunner) -> APIRouter:
     @router.get("")
     def list_cases():
         return runner.store.list_cases()
+
+    return router
+
+
+def build_import_router(runner: TaskRunner) -> APIRouter:
+    """Build safe import-ledger inspection, repair, and deletion endpoints."""
+    router = APIRouter(prefix="/api/imports", tags=["imports"])
+
+    def to_summary(record):
+        return ImportSummary(
+            import_id=record.import_id,
+            document_id=record.document_id,
+            source_name=record.source_name,
+            file_type=record.file_type,
+            parser_version=record.parser_version,
+            chunker_version=record.chunker_version,
+            expected_chunk_count=record.expected_chunk_count,
+            indexed_chunks=record.indexed_chunks,
+            imported_cases=record.imported_cases,
+            status=record.status,
+            created_at=record.created_at.isoformat(),
+            updated_at=record.updated_at.isoformat(),
+            error_code=record.error_code,
+        )
+
+    @router.get("", response_model=list[ImportSummary])
+    async def list_imports():
+        await runner.inspect_imports()
+        return [to_summary(record) for record in runner.store.list_import_records()]
+
+    @router.get("/{import_id}", response_model=ImportSummary)
+    def get_import(import_id: str):
+        record = runner.store.get_import(import_id)
+        if record is None or record.status == ImportStatus.DELETED:
+            raise HTTPException(status_code=404, detail="Import not found.")
+        return to_summary(record)
+
+    @router.post("/{import_id}/repair", response_model=ImportSummary)
+    async def repair_import(import_id: str):
+        results = await runner.reconcile_imports(import_id)
+        if not results:
+            raise HTTPException(status_code=404, detail="Import not found.")
+        record = runner.store.get_import(import_id)
+        assert record is not None
+        return to_summary(record)
+
+    @router.delete("/{import_id}", response_model=ImportSummary)
+    async def delete_import(import_id: str):
+        try:
+            await runner.delete_import(import_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="Import not found.") from error
+        record = runner.store.get_import(import_id)
+        assert record is not None
+        return to_summary(record)
 
     return router

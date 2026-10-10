@@ -1,17 +1,28 @@
 """Background task lifecycle orchestration over SQLite and LangGraph."""
 
 import asyncio
+import hashlib
 import logging
 from collections.abc import Callable
+from pathlib import Path
 from uuid import uuid4
 
 from converter_copilot.agent.workflows import WorkflowDeps, build_workflow
-from converter_copilot.config import WorkerSettings
+from converter_copilot.config import ImportLimits, WorkerSettings
 from converter_copilot.domain.schemas import (
+    CaseRecord,
     ConverterReport,
+    ImportRecord,
+    ImportRepairResult,
+    ImportStatus,
     TaskCreate,
     TaskMode,
     TaskRecord,
+)
+from converter_copilot.retrieval.case_extractor import extract_case_records
+from converter_copilot.retrieval.import_validation import (
+    ImportValidationError,
+    validate_upload,
 )
 from converter_copilot.storage.sqlite_store import SQLiteStore
 
@@ -89,7 +100,197 @@ class TaskRunner:
             return
         self._get_settings()
         self.store.requeue_expired_tasks()
+        if self.store.list_incomplete_imports():
+            await self.reconcile_imports()
         self._worker_task = asyncio.create_task(self._worker_loop())
+
+    async def reconcile_imports(self, import_id: str | None = None) -> list[ImportRepairResult]:
+        """Replay incomplete imports idempotently and report safe outcomes."""
+        records = (
+            [record] if (record := self.store.get_import(import_id)) is not None
+            else [] if import_id is not None
+            else self.store.list_incomplete_imports()
+        )
+        results = []
+        for record in records:
+            if record.status == ImportStatus.DELETING:
+                results.append(await self.delete_import(record.import_id))
+                continue
+            results.append(await self._reconcile_one_import(record))
+        return results
+
+    async def _reconcile_one_import(self, record: ImportRecord) -> ImportRepairResult:
+        source_path = Path(record.source_path)
+        if not source_path.is_file():
+            updated = self.store.update_import_status(
+                record.import_id, ImportStatus.NEEDS_REPAIR,
+                indexed_chunks=record.indexed_chunks,
+                imported_cases=record.imported_cases,
+                error_code="source_missing",
+            )
+            return self._import_repair_result(updated)
+        try:
+            source = validate_upload(
+                record.source_name,
+                source_path.read_bytes(),
+                ImportLimits.from_env(),
+                parser_version=record.parser_version,
+                chunker_version=record.chunker_version,
+            )
+        except ImportValidationError:
+            updated = self.store.update_import_status(
+                record.import_id, ImportStatus.NEEDS_REPAIR,
+                indexed_chunks=record.indexed_chunks,
+                imported_cases=record.imported_cases,
+                error_code="source_invalid",
+            )
+            return self._import_repair_result(updated)
+        if source.import_id != record.import_id or source.content_sha256 != record.content_sha256:
+            updated = self.store.update_import_status(
+                record.import_id, ImportStatus.NEEDS_REPAIR,
+                indexed_chunks=record.indexed_chunks,
+                imported_cases=record.imported_cases,
+                error_code="source_mismatch",
+            )
+            return self._import_repair_result(updated)
+
+        try:
+            deps = self.deps_provider()
+            self.store.save_import_chunks(record.import_id, source.chunks)
+            if not record.case_candidates_ready:
+                candidates = await self._extract_import_candidates(record, source, deps.model)
+                self.store.save_import_case_candidates(record.import_id, candidates)
+            self.store.update_import_status(
+                record.import_id, ImportStatus.INDEXING,
+                indexed_chunks=record.indexed_chunks,
+                imported_cases=record.imported_cases,
+            )
+            deps.vector_index.add(source.chunks)
+            case_count = self.store.promote_import_case_candidates(record.import_id)
+            updated = self.store.update_import_status(
+                record.import_id, ImportStatus.COMPLETE,
+                indexed_chunks=len(source.chunks),
+                imported_cases=case_count,
+            )
+        except Exception:
+            logger.error("Import replay failed: import_id=%s error_code=import_replay_failed", record.import_id)
+            updated = self.store.update_import_status(
+                record.import_id, ImportStatus.FAILED,
+                indexed_chunks=record.indexed_chunks,
+                imported_cases=record.imported_cases,
+                error_code="import_replay_failed",
+            )
+        return self._import_repair_result(updated)
+
+    async def _extract_import_candidates(self, record: ImportRecord, source, model) -> list[CaseRecord]:
+        """Extract or reconstruct candidates exactly once before vector writes."""
+        if record.file_type == "csv":
+            cases = []
+            for row_number, row in enumerate(source.case_rows, start=2):
+                case_id = hashlib.sha256(f"{record.import_id}:{row_number}".encode()).hexdigest()[:24]
+                matching_chunks = [chunk.chunk_id for chunk in source.chunks if chunk.locator == f"row {row_number}"]
+                cases.append(CaseRecord(
+                    case_id=f"case-{case_id}",
+                    equipment_type=row.get("equipment_type") or None,
+                    symptom=row["symptom"],
+                    cause=row.get("cause") or None,
+                    validation_result=row.get("validation_result") or None,
+                    handling_result=row.get("handling_result") or None,
+                    evidence_ids=matching_chunks,
+                ))
+            return cases
+        cases = []
+        for chunk in source.chunks[:8]:
+            cases.extend(await extract_case_records(
+                chunk.text,
+                evidence_id=chunk.chunk_id,
+                model=model,
+                import_id=record.import_id,
+            ))
+        return cases
+
+    async def inspect_imports(self) -> list[ImportRepairResult]:
+        """Mark complete imports with missing vectors for explicit repair."""
+        records = self.store.list_import_records()
+        if not records:
+            return []
+        try:
+            vector_index = self.deps_provider().vector_index
+        except Exception:
+            return [self._import_repair_result(record) for record in records]
+        results = []
+        for record in records:
+            if record.status != ImportStatus.COMPLETE:
+                results.append(self._import_repair_result(record))
+                continue
+            if not Path(record.source_path).is_file():
+                record = self.store.update_import_status(
+                    record.import_id, ImportStatus.NEEDS_REPAIR,
+                    indexed_chunks=record.indexed_chunks,
+                    imported_cases=record.imported_cases,
+                    error_code="source_missing",
+                )
+            elif not self.store.import_case_data_consistent(record.import_id):
+                record = self.store.update_import_status(
+                    record.import_id, ImportStatus.NEEDS_REPAIR,
+                    indexed_chunks=record.indexed_chunks,
+                    imported_cases=record.imported_cases,
+                    error_code="cases_incomplete",
+                )
+            else:
+                chunk_ids = self.store.get_import_chunk_ids(record.import_id)
+                if vector_index.contains_chunks(chunk_ids):
+                    results.append(self._import_repair_result(record))
+                    continue
+                record = self.store.update_import_status(
+                    record.import_id, ImportStatus.NEEDS_REPAIR,
+                    indexed_chunks=record.indexed_chunks,
+                    imported_cases=record.imported_cases,
+                    error_code="vectors_missing",
+                )
+            results.append(self._import_repair_result(record))
+        return results
+
+    async def delete_import(self, import_id: str) -> ImportRepairResult:
+        """Complete deletion safely across SQLite, Chroma, and retained bytes."""
+        record = self.store.get_import(import_id)
+        if record is None:
+            raise KeyError(import_id)
+        record = self.store.update_import_status(
+            import_id, ImportStatus.DELETING,
+            indexed_chunks=record.indexed_chunks,
+            imported_cases=record.imported_cases,
+        )
+        try:
+            chunk_ids = self.store.get_import_chunk_ids(import_id)
+            if chunk_ids:
+                self.deps_provider().vector_index.delete_chunks(chunk_ids)
+            self.store.delete_import_case_data(import_id)
+            self.store.clear_import_chunk_links(import_id)
+            Path(record.source_path).unlink(missing_ok=True)
+            updated = self.store.update_import_status(
+                import_id, ImportStatus.DELETED, indexed_chunks=0, imported_cases=0
+            )
+        except Exception:
+            logger.error("Import deletion interrupted: import_id=%s error_code=delete_incomplete", import_id)
+            updated = self.store.update_import_status(
+                import_id, ImportStatus.DELETING,
+                indexed_chunks=record.indexed_chunks,
+                imported_cases=record.imported_cases,
+                error_code="delete_incomplete",
+            )
+        return self._import_repair_result(updated)
+
+    @staticmethod
+    def _import_repair_result(record: ImportRecord) -> ImportRepairResult:
+        return ImportRepairResult(
+            import_id=record.import_id,
+            status=record.status,
+            expected_chunk_count=record.expected_chunk_count,
+            indexed_chunks=record.indexed_chunks,
+            imported_cases=record.imported_cases,
+            error_code=record.error_code,
+        )
 
     async def stop(self) -> None:
         """Stop polling and cancel local executions so their leases can recover."""

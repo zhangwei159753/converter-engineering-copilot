@@ -4,7 +4,7 @@ import sqlite3
 from collections.abc import Callable
 
 Migration = Callable[[sqlite3.Connection], None]
-CURRENT_SCHEMA_VERSION = 3
+CURRENT_SCHEMA_VERSION = 4
 
 
 def _create_base_schema(connection: sqlite3.Connection) -> None:
@@ -117,10 +117,17 @@ def _add_import_ledger(connection: sqlite3.Connection) -> None:
     connection.execute("CREATE INDEX idx_imports_status_created ON imports(status, created_at)")
 
 
+def _add_import_candidate_ready(connection: sqlite3.Connection) -> None:
+    columns = {row[1] for row in connection.execute("PRAGMA table_info(imports)")}
+    if "case_candidates_ready" not in columns:
+        connection.execute("ALTER TABLE imports ADD COLUMN case_candidates_ready INTEGER NOT NULL DEFAULT 0")
+
+
 MIGRATIONS: list[tuple[int, Migration]] = [
     (1, _create_base_schema),
     (2, _add_task_lifecycle_columns),
     (3, _add_import_ledger),
+    (4, _add_import_candidate_ready),
 ]
 
 

@@ -69,7 +69,7 @@ def test_empty_database_migrates_to_current_version(tmp_path):
         version = connection.execute("PRAGMA user_version").fetchone()[0]
         columns = {row[1] for row in connection.execute("PRAGMA table_info(tasks)")}
 
-    assert version == 3
+    assert version == 4
     assert {"task_id", "mode", "status", "inputs_json", "created_at", "updated_at"} <= columns
     with sqlite3.connect(database) as connection:
         assert connection.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'imports'").fetchone()
@@ -95,6 +95,7 @@ def test_import_ledger_preserves_identity_and_candidates(tmp_path):
     store.save_import_case_candidates("import-a", [case])
     updated = store.update_import_status("import-a", ImportStatus.INDEXING, indexed_chunks=1, imported_cases=0)
     candidates = store.get_import_case_candidates("import-a")
+    persisted = store.get_import("import-a")
 
     assert reused_first is False
     assert reused_second is True
@@ -102,6 +103,7 @@ def test_import_ledger_preserves_identity_and_candidates(tmp_path):
     assert updated.status == ImportStatus.INDEXING
     assert updated.indexed_chunks == 1
     assert candidates == [case]
+    assert persisted.case_candidates_ready is True
 
 
 def test_import_migration_preserves_existing_case_payload(tmp_path):
