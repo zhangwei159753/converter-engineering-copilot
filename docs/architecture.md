@@ -7,11 +7,11 @@ flowchart LR
   Browser[React workbench] -->|REST and SSE| API[FastAPI]
   API --> Runner[TaskRunner]
   Runner --> Graph[LangGraph workflows]
-  Graph --> Model[OpenAI chat model]
+  Graph --> Model[DeepSeek chat model]
   Graph --> Search[Optional Tavily search]
   Graph --> Chroma[Chroma vector index]
   API --> SQLite[SQLite tasks, events, reports, cases]
-  Chroma --> Embeddings[OpenAI embeddings]
+  Chroma --> Embeddings[Local FastEmbed BGE-small-zh model]
   WebContainer[Nginx web container] -->|/api proxy| API
 ```
 
@@ -28,7 +28,7 @@ The repository retains the upstream `open_deep_research` graph. The added `conve
 ## Persistence and observability
 
 - SQLite: `.data/converter_copilot.db` by default.
-- Chroma: `.data/chroma` by default, using OpenAI embeddings unless a fake embedding function is injected for tests.
+- Chroma: `.data/chroma` by default, using the local FastEmbed BGE-small-zh model unless an embedding function is injected for tests. The DeepSeek-backed collection has a versioned name so existing OpenAI vectors remain untouched; re-import source documents to populate it.
 - Evaluation output: `.data/evaluation_results/` by default.
 - Health: `/api/health` confirms the process responds. Readiness: `/api/ready` performs a SQLite read and returns HTTP 503 if storage is unavailable.
 - Optional LangSmith tracing is enabled only when `LANGSMITH_TRACING=true` and `LANGSMITH_API_KEY` is present. Each run is tagged with task ID and mode. Traces can include prompts and model inputs, so enable them only for data approved for that workspace.

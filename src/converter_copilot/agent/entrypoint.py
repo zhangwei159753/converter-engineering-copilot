@@ -30,23 +30,38 @@ class EmptySearchAdapter:
         return []
 
 
+class DeepSeekChatOpenAI(ChatOpenAI):
+    """Configure LangChain's structured responses for DeepSeek tool calling."""
+
+    def with_structured_output(self, schema=None, *, method="function_calling", **kwargs):
+        return super().with_structured_output(schema, method=method, **kwargs)
+
+
 def build_default_deps(config: dict | None = None) -> WorkflowDeps:
     """Create production dependencies from server environment or explicit config."""
     runtime = RuntimeConfig.from_env()
     config = config or {}
-    api_key = config.get("openai_api_key") or runtime.openai_api_key
+    api_key = config.get("deepseek_api_key") or runtime.deepseek_api_key
     if not api_key:
-        raise RuntimeError("OPENAI_API_KEY is required to run a converter workflow.")
+        raise RuntimeError("DEEPSEEK_API_KEY is required to run a converter workflow.")
     runtime.apply_tracing_environment()
-    model = ChatOpenAI(
+    model = DeepSeekChatOpenAI(
         model=config.get("model") or runtime.model,
         temperature=0,
         api_key=api_key,
+        base_url=config.get("base_url") or runtime.base_url,
+        extra_body={"thinking": {"type": "disabled"}},
     )
     return WorkflowDeps(
         model=model,
         search=TavilySearchAdapter() if os.getenv("TAVILY_API_KEY") else EmptySearchAdapter(),
-        vector_index=VectorIndex(os.getenv("CHROMA_PERSIST_DIR", ".data/chroma")),
+        vector_index=VectorIndex(
+            os.getenv("CHROMA_PERSIST_DIR", ".data/chroma"),
+            collection_name=os.getenv(
+                "CHROMA_COLLECTION_NAME",
+                "converter_engineering_copilot_bge_small_zh_v1_5",
+            ),
+        ),
     )
 
 

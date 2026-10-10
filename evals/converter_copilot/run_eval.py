@@ -33,8 +33,8 @@ def _load_jsonl(path: Path) -> list[dict]:
 
 async def _run(modes: list[str], output_dir: Path, recall_at_k: int) -> list[dict]:
     config = RuntimeConfig.from_env()
-    if not config.openai_api_key:
-        raise RuntimeError("OPENAI_API_KEY is required for live evaluation. Add it to .env or the environment.")
+    if not config.deepseek_api_key:
+        raise RuntimeError("DEEPSEEK_API_KEY is required for live evaluation. Add it to .env or the environment.")
     config.apply_tracing_environment()
     deps = build_default_deps()
     summaries = []

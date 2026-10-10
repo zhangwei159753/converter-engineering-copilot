@@ -5,8 +5,12 @@ services:
       dockerfile: Dockerfile
       target: api
     environment:
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      CONVERTER_MODEL: ${CONVERTER_MODEL:-gpt-4.1-mini}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      CONVERTER_MODEL: ${CONVERTER_MODEL:-deepseek-flash}
+      FASTEMBED_MODEL: ${FASTEMBED_MODEL:-BAAI/bge-small-zh-v1.5}
+      FASTEMBED_CACHE_DIR: /app/.data/fastembed
+      CHROMA_COLLECTION_NAME: ${CHROMA_COLLECTION_NAME:-converter_engineering_copilot_bge_small_zh_v1_5}
       TAVILY_API_KEY: ${TAVILY_API_KEY:-}
       LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
       LANGSMITH_PROJECT: ${LANGSMITH_PROJECT:-converter-engineering-copilot}

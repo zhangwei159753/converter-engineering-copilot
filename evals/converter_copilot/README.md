@@ -7,7 +7,7 @@ uv run python evals/converter_copilot/run_eval.py
 uv run python evals/converter_copilot/run_eval.py --mode fault_analysis
 ```
 
-The runner requires `OPENAI_API_KEY` because it executes the selected LangGraph workflows. Results are written as timestamped JSON files under `.data/evaluation_results/`. Each row is isolated: a failed example is recorded with its ID and error while later rows continue. The output includes report status, evidence and claim counts, elapsed time, schema pass rate, citation coverage, and failures. Cost remains `null` until provider usage and pricing data can be measured reliably.
+The runner requires `DEEPSEEK_API_KEY` because it executes the selected LangGraph workflows. Local document retrieval uses FastEmbed and the `BAAI/bge-small-zh-v1.5` model, downloaded on first use. Results are written as timestamped JSON files under `.data/evaluation_results/`. Each row is isolated: a failed example is recorded with its ID and error while later rows continue. The output includes report status, evidence and claim counts, elapsed time, schema pass rate, citation coverage, and failures. Cost remains `null` until provider usage and pricing data can be measured reliably.
 
 ## Metrics and labels
 

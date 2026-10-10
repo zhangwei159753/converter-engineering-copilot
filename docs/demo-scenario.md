@@ -1,6 +1,6 @@
 # Local demo scenario
 
-This walkthrough uses only synthetic demonstration cases and requires a configured OpenAI API key for embeddings and model calls. The examples are not real incidents, manufacturer data, or validated maintenance outcomes.
+This walkthrough uses only synthetic demonstration cases. It requires a configured DeepSeek API key for model calls; FastEmbed downloads the local `BAAI/bge-small-zh-v1.5` embedding model on first use. The examples are not real incidents, manufacturer data, or validated maintenance outcomes.
 
 ## 1. Start the application
 

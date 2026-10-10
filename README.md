@@ -14,9 +14,9 @@
 
 ## 本机运行
 
-需要 Python 3.11、[uv](https://docs.astral.sh/uv/)、Node.js 20+ 和 npm。任务分析需要 OpenAI API key；Tavily 和 LangSmith 是可选服务。没有 Tavily key 时，系统仍可使用本地资料检索。
+需要 Python 3.11、[uv](https://docs.astral.sh/uv/)、Node.js 20+ 和 npm。任务分析需要 DeepSeek API key；文档向量使用本地 FastEmbed 模型，首次启动时会下载模型文件。Tavily 和 LangSmith 是可选服务。没有 Tavily key 时，系统仍可使用本地资料检索。
 
-1. 从模板创建 `.env`，在 API 使用的环境中填写 `OPENAI_API_KEY`。`TAVILY_API_KEY` 和 LangSmith 设置可留空。
+1. 从模板创建 `.env`，在 API 使用的环境中填写 `DEEPSEEK_API_KEY`。`DEEPSEEK_BASE_URL` 默认指向 DeepSeek 官方 API；`TAVILY_API_KEY` 和 LangSmith 设置可留空。
 
    ```powershell
    Copy-Item .env.example .env
@@ -39,17 +39,17 @@
 
 4. 打开 <http://localhost:5173>。API 文档在 <http://localhost:8000/docs>，存活检查在 `/api/health`，SQLite readiness 检查在 `/api/ready`。
 
-数据库、Chroma 向量索引和评测结果默认写入 `.data/`。文档导入接受 `.pdf`、`.md` 和 `.csv`。首次本地文档导入和检索需要 OpenAI embeddings 配置。不要上传未经授权的工厂、客户或个人数据。
+数据库、Chroma 向量索引、FastEmbed 模型缓存和评测结果默认写入 `.data/`。文档导入接受 `.pdf`、`.md` 和 `.csv`。向量模型默认使用适合中文技术资料的 `BAAI/bge-small-zh-v1.5`，首次导入或检索时会下载模型；需要联网及约 100 MB 磁盘空间。向量集合使用新的 `converter_engineering_copilot_bge_small_zh_v1_5` 名称，保留旧 OpenAI 向量集合不动；已有资料需重新导入以生成本地向量。不要上传未经授权的工厂、客户或个人数据。
 
 ## Docker Compose
 
-安装 Docker Desktop，创建 `.env` 并填写 API key，然后运行：
+安装 Docker Desktop，创建 `.env` 并填写 `DEEPSEEK_API_KEY`，然后运行：
 
 ```powershell
 docker compose up --build
 ```
 
-Web 工作台在 <http://localhost:5173>，API 文档在 <http://localhost:8000/docs>。Compose 使用命名卷保存数据库和 Chroma；模型、搜索、LangSmith 密钥仅传给 API 容器，Web 镜像不包含这些密钥。API key 没有配置时，页面和健康检查仍可打开，但模型任务会失败并展示服务状态。
+Web 工作台在 <http://localhost:5173>，API 文档在 <http://localhost:8000/docs>。Compose 使用命名卷保存数据库、Chroma 和 FastEmbed 模型；模型、搜索、LangSmith 密钥仅传给 API 容器，Web 镜像不包含这些密钥。DeepSeek key 没有配置时，页面和健康检查仍可打开，但模型任务会失败并展示服务状态。
 
 ## 评测
 
@@ -59,7 +59,7 @@ uv run python evals/converter_copilot/run_eval.py
 uv run python evals/converter_copilot/run_eval.py --mode fault_analysis --recall-at-k 5
 ```
 
-评测执行真实工作流，需要 `OPENAI_API_KEY`。结果写到 `.data/evaluation_results/`。仓库中的起始样例尚无检索金标准和人工证据支持标注，因此相关指标会如实为 `null`；请先人工复核标注，不能把合成示例或未标注分数写成质量承诺。评测定义、字段和 tracing 说明见 [评测说明](evals/converter_copilot/README.md)。
+评测执行真实工作流，需要 `DEEPSEEK_API_KEY`。结果写到 `.data/evaluation_results/`。仓库中的起始样例尚无检索金标准和人工证据支持标注，因此相关指标会如实为 `null`；请先人工复核标注，不能把合成示例或未标注分数写成质量承诺。评测定义、字段和 tracing 说明见 [评测说明](evals/converter_copilot/README.md)。
 
 ## 演示路径与设计说明
 

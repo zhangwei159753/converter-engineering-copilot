@@ -14,7 +14,8 @@ def _as_bool(value: str | None) -> bool:
 class RuntimeConfig:
     """Runtime settings needed by the copilot server and evaluation CLI."""
 
-    openai_api_key: str | None
+    deepseek_api_key: str | None
+    base_url: str
     model: str
     langsmith_api_key: str | None
     langsmith_project: str | None
@@ -27,8 +28,9 @@ class RuntimeConfig:
         tracing_requested = _as_bool(os.getenv("LANGSMITH_TRACING"))
         langsmith_api_key = os.getenv("LANGSMITH_API_KEY")
         return cls(
-            openai_api_key=os.getenv("OPENAI_API_KEY"),
-            model=os.getenv("CONVERTER_MODEL", "gpt-4.1-mini"),
+            deepseek_api_key=os.getenv("DEEPSEEK_API_KEY"),
+            base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
+            model=os.getenv("CONVERTER_MODEL", "deepseek-flash"),
             langsmith_api_key=langsmith_api_key,
             langsmith_project=os.getenv("LANGSMITH_PROJECT"),
             tracing_enabled=tracing_requested and bool(langsmith_api_key),
