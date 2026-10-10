@@ -284,24 +284,24 @@ Expected: PASS; unreviewed data is never shown as reusable memory.
 - `branch_metrics` report evidence-ID integrity, support/opposition coverage, unsupported candidate share, applicability warning share, and incomplete-review share without naming them as truth/accuracy metrics absent human gold labels.
 - UI displays dataset source, label counts, workflow version, agent strategy, branch metrics, latency, and unavailable-usage reason.
 
-- [ ] **Step 1: Write failing evaluation tests** comparing baseline and collaborative modes over the same records, separating synthetic/manual samples, and returning null for unavailable labels/usage.
-- [ ] **Step 2: Run focused evaluation tests and confirm comparison fields are missing.**
+- [x] **Step 1: Write failing evaluation tests** comparing baseline and collaborative modes over the same records, separating synthetic/manual samples, and returning null for unavailable labels/usage.
+- [x] **Step 2: Run focused evaluation tests and confirm comparison fields are missing.**
 
 Run: `python -m pytest tests/converter_copilot/test_collaboration_evaluation.py -q`
 
 Expected: FAIL before evaluation records expose collaboration metrics.
 
-- [ ] **Step 3: Extend `evaluate_records`** to run named baseline/collaboration strategies with deterministic adapters, retaining per-run task/branch outcomes and no network calls in unit tests.
-- [ ] **Step 4: Add branch-level deterministic metrics and truthful sample counts**; never infer semantic truth from citation presence or model self-confidence.
-- [ ] **Step 5: Extend the evaluation view** and mark synthetic-only results as workflow checks, not field-accuracy evidence.
-- [ ] **Step 6: Document architecture, role contracts, budget defaults, memory eligibility/revocation, restart/migration behavior, local API routes, and safety boundary.**
-- [ ] **Step 7: Run backend collaboration/evaluation tests, relevant existing work-order/evidence tests, frontend tests, lint, and build.**
+- [x] **Step 3: Extend `evaluate_records`** to run named baseline/collaboration strategies with deterministic adapters, retaining per-run task/branch outcomes and no network calls in unit tests.
+- [x] **Step 4: Add branch-level deterministic metrics and truthful sample counts**; never infer semantic truth from citation presence or model self-confidence.
+- [x] **Step 5: Extend the evaluation view** and mark synthetic-only results as workflow checks, not field-accuracy evidence.
+- [x] **Step 6: Document architecture, role contracts, budget defaults, memory eligibility/revocation, restart/migration behavior, local API routes, and safety boundary.**
+- [x] **Step 7: Run backend collaboration/evaluation tests, relevant existing work-order/evidence tests, frontend tests, lint, and build.**
 
 Run: `python -m pytest tests/converter_copilot -q`; `npm test -- --run`; `npm run build`; `ruff check src/converter_copilot`
 
 Expected: PASS; deterministic tests make no DeepSeek/Tavily requests, and any environment-dependent integration limitation is reported separately.
 
-- [ ] **Step 8: Commit** as `feat: evaluate and document agent collaboration`.
+- [x] **Step 8: Commit** as `feat: evaluate and document agent collaboration`.
 
 ## Dependency and Delivery Order
 

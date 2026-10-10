@@ -63,3 +63,14 @@ Run deterministic metric tests without provider keys:
 ```powershell
 uv run pytest tests/converter_copilot/test_eval_metrics.py tests/converter_copilot/test_eval_runner.py -q
 ```
+
+## Multi-agent strategy comparison
+
+Compare the retained single-workflow baseline with bounded collaborative fault analysis on exactly the same records:
+
+```powershell
+uv run python evals/converter_copilot/run_eval.py --mode fault_analysis --compare-strategies
+```
+The comparison executes both workflows for each record and makes about twice as many model calls. It writes paired per-example outcomes, metric deltas, branch evidence-integrity/coverage/applicability/completion checks, agent timing and lifecycle counts, and one review bundle per strategy. Open the comparison JSON in **人工评测 → 多 Agent 工作流对比**; the browser reads it locally. Import each strategy's `*-review.json` separately to add human evidence labels.
+
+Built-in data remains synthetic and unreviewed. Branch/citation metrics are deterministic workflow-integrity measures, not semantic accuracy. Retrieval recall, evidence-support rate, and human-labeled branch quality stay unavailable until reviewers create the appropriate labels. Provider usage appears only when an adapter supplies usage metadata.

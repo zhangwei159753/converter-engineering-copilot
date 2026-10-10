@@ -12,6 +12,9 @@
 - **交互式 Web 工作台**：创建任务、查看 SSE 进度、打开来源摘录、回看任务和导出 Markdown 报告。
 - **工单辅助研判台**：查看只读合成工单、检查设备上下文与缺失字段、发起故障分析、查看关联证据报告并追加人工审核记录。
 - **人工评测工作台**：导入模型运行的证据快照，标注证据支持度和检索金标准，追踪复核版本；未复核标签不参与质量指标。
+- **多 Agent 协作审计**：将故障研判拆成受预算限制的角色步骤，呈现执行时间线、候选假设分支、支持与反对证据、适用性门禁和审核未完成状态；不暴露私有 CoT。
+- **复核记忆检索**：只从可追溯且被工程师接受的报告构建关联，工单展示来源工单、复核版本、适用差异和报告证据链接；不把相似度解释成因果概率。
+- **离线策略对比**：使用同一数据集对比 baseline 和 collaborative，将结构指标与人工质量指标分开；评测摘要可在浏览器本地导入查看。
 
 ## 本机运行
 
@@ -87,10 +90,10 @@ Web 工作台在 <http://localhost:5173>，API 文档在 <http://localhost:8000/
 ```powershell
 uv run pytest tests/converter_copilot -q
 uv run python evals/converter_copilot/run_eval.py
-uv run python evals/converter_copilot/run_eval.py --mode fault_analysis --recall-at-k 5
+uv run python evals/converter_copilot/run_eval.py --mode fault_analysis --compare-strategies --recall-at-k 5
 ```
 
-评测执行真实工作流，需要 `DEEPSEEK_API_KEY`。结果摘要与单独的 review bundle 写到 `.data/evaluation_results/`。在 Web 左侧进入“人工评测”，导入 bundle 后检查证据摘录与定位，填写本地复核人并保存标注；后续修改会追加新版本。仓库中的合成起始样例没有检索金标准和人工支持标签，因此相关指标为 `null` 并显示 `insufficient_labels`。人工标注不等于现场验证，不能把合成数据或未标注分数写成质量承诺。评测字段、复核过程和指标限制见 [评测说明](evals/converter_copilot/README.md)。
+评测执行真实工作流，需要 `DEEPSEEK_API_KEY`。`--compare-strategies` 会对每条样例各运行 baseline 和 collaborative 一次，模型调用约为单策略运行的两倍；输出摘要与每种策略独立的 review bundle 写到 `.data/evaluation_results/`。在 Web 左侧进入“人工评测”，通过“导入 Agent 离线评测结果”在浏览器本地查看策略比较，再分别导入 review bundle 检查证据摘录与定位、人工标注。仓库中的合成起始样例没有检索金标准和人工支持标签，人工质量指标会保持 `null`；结构完整度不能替代准确率或现场验证。评测字段、复核过程和指标限制见 [评测说明](evals/converter_copilot/README.md)。
 
 ## 演示路径与设计说明
 

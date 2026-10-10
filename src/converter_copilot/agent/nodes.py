@@ -17,8 +17,8 @@ from converter_copilot.agent.prompts import (
     format_research_prompt,
 )
 from converter_copilot.agent.state import ConverterState
-from converter_copilot.domain.evidence import validate_report_evidence
 from converter_copilot.domain.equipment import classify_equipment_applicability
+from converter_copilot.domain.evidence import validate_report_evidence
 from converter_copilot.domain.schemas import (
     CaseMatch,
     CaseRecord,

@@ -374,9 +374,14 @@ class TaskRunner:
                 raise RuntimeError("Workflow completed without a report.")
             self.store.finish_task(task_id, report, worker_id=self._worker_id)
         except asyncio.TimeoutError:
+            self.store.mark_running_agent_runs_incomplete_for_worker(task_id, worker_id=self._worker_id)
             self.store.fail_task(task_id, worker_id=self._worker_id, error_code="task_timeout")
+        except asyncio.CancelledError:
+            self.store.mark_running_agent_runs_incomplete_for_worker(task_id, worker_id=self._worker_id)
+            raise
         except Exception:
             logger.error("Task execution failed: task_id=%s error_code=workflow_error", task_id)
+            self.store.mark_running_agent_runs_incomplete_for_worker(task_id, worker_id=self._worker_id)
             self.store.fail_task(task_id, worker_id=self._worker_id, error_code="workflow_error")
         finally:
             current = self._active.get(task_id)

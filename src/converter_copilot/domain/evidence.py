@@ -1,7 +1,7 @@
 """Deterministic citation integrity checks for generated reports."""
 
-from collections import Counter
 import re
+from collections import Counter
 
 from converter_copilot.domain.schemas import ConverterReport, EvidenceCheckResult
 

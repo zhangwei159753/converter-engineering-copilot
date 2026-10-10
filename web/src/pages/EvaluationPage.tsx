@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Check, ClipboardCheck, FileUp, History, RefreshCw, ShieldAlert } from "lucide-react";
 import { getEvaluationHistory, getEvaluationSummary, importReviewBundle, listEvaluationExamples, saveEvaluationReview } from "../api/client";
-import type { EvaluationExample, EvaluationReviewEvent, EvaluationSummary, EvidenceReviewLabel } from "../types";
+import type { EvaluationExample, EvaluationReviewEvent, EvaluationSummary, EvidenceReviewLabel, OfflineEvaluationReport, OfflineStrategyEvaluation } from "../types";
 
 const labelOptions: Array<{ value: EvidenceReviewLabel; label: string }> = [
   { value: "supported", label: "支持" }, { value: "unsupported", label: "不支持" }, { value: "unverified", label: "无法判断" },
@@ -32,6 +32,7 @@ export default function EvaluationPage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
+  const [offlineRun, setOfflineRun] = useState<OfflineEvaluationReport | null>(null);
 
   const selected = examples.find((example) => example.review_id === selectedId) ?? examples[0];
   const evidenceById = useMemo(() => new Map((selected?.evidence ?? []).map((item) => [item.evidence_id, item])), [selected]);
@@ -67,6 +68,24 @@ export default function EvaluationPage() {
     } finally { setBusy(false); }
   }
 
+  async function uploadOfflineRun(file?: File) {
+    if (!file) return;
+    setError(""); setNotice("");
+    try {
+      const parsed = JSON.parse(await readFile(file)) as unknown;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("评测结果必须是 JSON 对象。");
+      const candidate = parsed as Record<string, unknown>;
+      const hasStrategies = candidate.strategies && typeof candidate.strategies === "object" && !Array.isArray(candidate.strategies);
+      if (typeof candidate.mode !== "string" || typeof candidate.dataset_version !== "string" || (!hasStrategies && typeof candidate.agent_strategy !== "string")) {
+        throw new Error("文件不包含可识别的 Agent 离线评测摘要。");
+      }
+      setOfflineRun(candidate as unknown as OfflineEvaluationReport);
+      setNotice("离线评测摘要已在本页载入；原始评测文件未上传到服务端。");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "无法读取 Agent 离线评测摘要。");
+    }
+  }
+
   function changeLabel(evidenceId: string, claimId: string, label: EvidenceReviewLabel) {
     setLabels((current) => {
       const rest = current.filter((item) => item.evidence_id !== evidenceId || item.claim_id !== claimId);
@@ -95,6 +114,10 @@ export default function EvaluationPage() {
     .flatMap(([, item]) => Object.keys(item.source_types));
   const uniqueSourceTypes = [...new Set(sourceTypes)].sort();
   const outputContext = selected?.output_context ?? {};
+  const offlineStrategies: Array<[string, OfflineStrategyEvaluation]> = offlineRun?.strategies
+    ? Object.entries(offlineRun.strategies)
+    : offlineRun?.agent_strategy ? [[offlineRun.agent_strategy, offlineRun as unknown as OfflineStrategyEvaluation]] : [];
+  const percent = (value: number | null | undefined) => value == null ? "不可用" : `${(value * 100).toFixed(1)}%`;
 
   return <div className="evaluation-page">
     <div className="workspace-heading"><div><div className="breadcrumb"><span>质量管理</span><span>／</span><span>人工评测</span></div><h1>把模型输出放进复核闭环<span>.</span></h1><p>复核证据与检索标签，保留每次修改记录；未复核数据不会进入质量指标。</p></div><div className="heading-stamp"><span>HUMAN REVIEW</span><strong>{String(counts.total).padStart(2, "0")}</strong><small>LOCAL EVALUATION</small></div></div>
@@ -102,6 +125,23 @@ export default function EvaluationPage() {
     <section className="eval-overview" aria-label="评测概览">
       <div><small>全部样例</small><strong>{counts.total}</strong></div><div><small>待复核</small><strong>{counts.pending}</strong></div><div><small>已复核</small><strong>{counts.reviewed}</strong></div>
       <label className="eval-upload"><FileUp size={16} />{busy ? "处理中…" : "导入 review bundle"}<input aria-label="导入 review bundle" type="file" accept="application/json,.json" disabled={busy} onChange={(event) => upload(event.target.files?.[0])} /></label>
+    </section>
+    <section className="eval-agent-run" aria-label="Agent 离线评测摘要">
+      <div className="eval-agent-run-head"><div><span className="section-kicker">OFFLINE AGENT EVALUATION</span><h2>多 Agent 工作流对比</h2><p>查看相同数据集上的策略结果、分支审计结构和人工标签覆盖；合成数据只验证工作流行为。</p></div><label className="eval-run-upload"><FileUp size={14} />导入 Agent 离线评测结果<input aria-label="导入 Agent 离线评测结果" type="file" accept="application/json,.json" onChange={(event) => uploadOfflineRun(event.target.files?.[0])} /></label></div>
+      {!offlineRun ? <div className="eval-agent-empty">尚未载入离线运行摘要。使用 <code>python evals/converter_copilot/run_eval.py --mode fault_analysis --compare-strategies</code> 运行后，选择生成的 JSON 结果文件；文件只在当前浏览器页面解析。</div> : <>
+        <div className="eval-agent-meta"><span>工作流：{offlineRun.mode}</span><span>数据集版本：<code>{offlineRun.dataset_version}</code></span>{offlineRun.dataset && <span>数据源：{offlineRun.dataset}</span>}<span>人工检索标签样例：{offlineStrategies.reduce((sum, [, item]) => sum + (item.metric_sample_counts?.retrieval_labeled_examples ?? 0), 0)}</span><span>人工证据标签：{offlineStrategies.reduce((sum, [, item]) => sum + (item.metric_sample_counts?.reviewed_evidence_labels ?? 0), 0)}</span></div>
+        {offlineRun.paired_comparison && <div className="eval-paired-note">同一数据集配对样例 {offlineRun.paired_comparison.paired_example_count} 条 · 指标差值按第二种策略减第一种策略 · {offlineRun.paired_comparison.interpretation}</div>}
+        <div className="eval-agent-strategies">{offlineStrategies.map(([name, item]) => <article className="eval-agent-strategy" key={name}>
+          <div className="eval-agent-strategy-head"><div><span>{item.agent_strategy}</span><small>{item.workflow_version} · {item.example_count} 个样例{item.synthetic_example_count ? ` · 合成/未复核 ${item.synthetic_example_count}` : ""}</small></div><strong>报告指标</strong></div>
+          <div className="eval-agent-metrics"><div><small>Schema 通过率</small><strong>{percent(item.schema_pass_rate)}</strong></div><div><small>引用覆盖率</small><strong>{percent(item.citation_coverage)}</strong></div><div><small>引用结构完整率</small><strong>{percent(item.citation_integrity_rate)}</strong></div><div><small>人工证据支持率</small><strong>{percent(item.manual_evidence_support_rate)}</strong></div></div>
+          <div className="eval-agent-branches"><strong>分支结构指标</strong><span>证据 ID 完整 {percent(item.branch_metrics?.evidence_id_integrity_rate)}</span><span>支持/反证覆盖 {percent(item.branch_metrics?.support_opposition_coverage)}</span><span>无支持候选 {percent(item.branch_metrics?.unsupported_candidate_share)}</span><span>适用性警示 {percent(item.branch_metrics?.applicability_warning_share)}</span><span>复核未完成 {percent(item.branch_metrics?.incomplete_review_share)}</span><span>人工分支质量 {percent(item.branch_metrics?.human_labeled_branch_quality)}</span></div>
+          <div className="eval-agent-ops">Agent 运行：{Object.entries(item.agent_run_counts ?? {}).map(([state, count]) => `${state} ${count}`).join(" · ") || "无记录"} · Agent 平均耗时 {item.agent_latency_ms?.mean == null ? "不可用" : `${item.agent_latency_ms.mean.toFixed(1)} ms`} · 预算耗尽 {item.budget_exhaustion_count ?? 0} 次</div>
+          {item.provider_usage && <small className="eval-agent-limits">Provider usage：{Object.entries(item.provider_usage).map(([unit, count]) => `${unit} ${count}`).join(" · ")}</small>}
+          {item.provider_usage_unavailable_reason && <small className="eval-agent-limits">Token 用量：{item.provider_usage_unavailable_reason}</small>}
+        </article>)}</div>
+        {offlineRun.paired_comparison && <div className="eval-agent-deltas"><strong>配对差值</strong>{Object.entries(offlineRun.paired_comparison.metric_deltas_second_minus_first).map(([key, value]) => <span key={key}>{key}：{value == null ? "标签不足" : `${value > 0 ? "+" : ""}${(value * 100).toFixed(1)} 个百分点`}</span>)}<span>平均耗时差：{offlineRun.paired_comparison.mean_latency_delta_ms_second_minus_first == null ? "不可用" : `${offlineRun.paired_comparison.mean_latency_delta_ms_second_minus_first.toFixed(1)} ms`}</span></div>}
+        <small className="eval-agent-limits">引用存在不等于语义支持；未导入人工标注集时，证据支持率和人工分支质量保持“不可用”，不会从模型置信度推断准确率。</small>
+      </>}
     </section>
     <div className="eval-filters"><label>工作流<select value={mode} onChange={(event) => setMode(event.target.value)}><option value="">全部工作流</option><option value="fault_analysis">故障分析</option><option value="technical_research">技术研究</option></select></label><label>复核状态<select value={status} onChange={(event) => setStatus(event.target.value)}><option value="">全部状态</option><option value="pending">待复核</option><option value="reviewed">已复核</option></select></label><label>来源类型<select value={sourceType} onChange={(event) => setSourceType(event.target.value)}><option value="">全部来源</option>{uniqueSourceTypes.map((value) => <option key={value} value={value}>{value}</option>)}</select></label><div className="eval-metric-note"><ShieldAlert size={14} />{summary?.metric_status.retrieval_recall_at_k === "insufficient_labels" || summary?.metric_status.manual_evidence_support_rate === "insufficient_labels" ? "标签不足，未达到条件的指标显示 null。" : "质量指标使用已复核标签计算。"} 检索 {summary?.metric_sample_counts.retrieval_labeled_examples ?? 0} 条 · 证据 {summary?.metric_sample_counts.reviewed_evidence_labels ?? 0} 条</div></div>
     <div className="eval-layout">

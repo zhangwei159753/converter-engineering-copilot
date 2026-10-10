@@ -1,5 +1,5 @@
-from converter_copilot.domain.equipment import classify_equipment_applicability
 from converter_copilot.agent.nodes import _source_equipment_type
+from converter_copilot.domain.equipment import classify_equipment_applicability
 from converter_copilot.domain.schemas import RetrievedChunk
 
 

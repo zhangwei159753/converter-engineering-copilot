@@ -56,6 +56,7 @@ async def _run(
     output_dir: Path,
     recall_at_k: int,
     dataset_paths: dict[str, Path] | None = None,
+    compare_strategies: bool = False,
 ) -> list[dict]:
     config = RuntimeConfig.from_env()
     if not config.deepseek_api_key:
@@ -75,21 +76,37 @@ async def _run(
             issue = issues[0]
             raise ValueError(f"{dataset.name}:{issue.line_number}:{issue.field}: {issue.message}")
         dataset_version = hashlib.sha256(dataset.read_bytes()).hexdigest()[:16]
-        graph = build_workflow(mode, deps)
-        summary = await evaluate_records(
-            mode=mode.value,
-            records=records,
-            graph=graph,
-            recall_at_k=recall_at_k,
-            dataset_version=dataset_version,
-        )
+        if compare_strategies and mode != TaskMode.FAULT_ANALYSIS:
+            raise ValueError("--compare-strategies currently supports fault_analysis only.")
+        if compare_strategies:
+            strategy_graphs = {
+                strategy: build_workflow(mode, deps, agent_strategy=strategy)
+                for strategy in ("baseline", "collaborative")
+            }
+            summary = await evaluate_records(
+                mode=mode.value, records=records, graph=strategy_graphs["baseline"],
+                strategy_graphs=strategy_graphs, recall_at_k=recall_at_k, dataset_version=dataset_version,
+            )
+        else:
+            graph = build_workflow(mode, deps)
+            summary = await evaluate_records(
+                mode=mode.value, records=records, graph=graph, recall_at_k=recall_at_k,
+                dataset_version=dataset_version, agent_strategy="collaborative" if mode == TaskMode.FAULT_ANALYSIS else None,
+            )
         summary["dataset"] = _dataset_label(dataset)
         summary["generated_at"] = datetime.now(timezone.utc).isoformat()
         summary["tracing_enabled"] = config.tracing_enabled
-        review_bundle = summary.pop("review_bundle")
-        bundle_target = output_dir / f"{mode.value}-{stamp}-review.json"
-        bundle_target.write_text(json.dumps(review_bundle, ensure_ascii=False, indent=2), encoding="utf-8")
-        summary["review_bundle_file"] = str(bundle_target)
+        if compare_strategies:
+            for strategy, result in summary["strategies"].items():
+                review_bundle = result.pop("review_bundle")
+                bundle_target = output_dir / f"{mode.value}-{strategy}-{stamp}-review.json"
+                bundle_target.write_text(json.dumps(review_bundle, ensure_ascii=False, indent=2), encoding="utf-8")
+                result["review_bundle_file"] = str(bundle_target)
+        else:
+            review_bundle = summary.pop("review_bundle")
+            bundle_target = output_dir / f"{mode.value}-{stamp}-review.json"
+            bundle_target.write_text(json.dumps(review_bundle, ensure_ascii=False, indent=2), encoding="utf-8")
+            summary["review_bundle_file"] = str(bundle_target)
         target = output_dir / f"{mode.value}-{stamp}.json"
         target.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
         summary["result_file"] = str(target)
@@ -104,6 +121,7 @@ def main() -> int:
     parser.add_argument("--dataset", type=Path, help="Use a specific JSONL dataset; requires exactly one --mode (defaults to fault_analysis).")
     parser.add_argument("--output-dir", type=Path, default=Path(".data/evaluation_results"))
     parser.add_argument("--recall-at-k", type=int, default=5)
+    parser.add_argument("--compare-strategies", action="store_true", help="Run baseline and collaborative fault workflows on the same dataset (two workflow runs per example).")
     args = parser.parse_args()
     if args.recall_at_k < 1:
         parser.error("--recall-at-k must be at least 1")
@@ -112,9 +130,11 @@ def main() -> int:
         if args.dataset is not None
         else [TaskMode.FAULT_ANALYSIS.value, TaskMode.TECHNICAL_RESEARCH.value]
     )
+    if args.compare_strategies and modes != [TaskMode.FAULT_ANALYSIS.value]:
+        parser.error("--compare-strategies requires exactly one --mode fault_analysis.")
     try:
         dataset_paths = _dataset_paths(modes, args.dataset)
-        results = asyncio.run(_run(modes, args.output_dir, args.recall_at_k, dataset_paths))
+        results = asyncio.run(_run(modes, args.output_dir, args.recall_at_k, dataset_paths, args.compare_strategies))
     except (RuntimeError, ValueError) as error:
         parser.exit(2, f"Evaluation stopped: {error}\n")
     sys.stdout.write(json.dumps(results, ensure_ascii=False, indent=2) + "\n")

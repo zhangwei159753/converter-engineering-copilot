@@ -135,6 +135,19 @@ def test_hypothesis_gate_blocks_unknown_evidence_ids():
     assert state["report"].completion_status == "partial"
 
 
+def test_opposing_evidence_is_preserved_but_branch_is_not_promoted():
+    model = SchemaModel(audit_results=[_audit(oppose=("ev-1",))] * 3)
+
+    state = asyncio.run(_graph(model).ainvoke(_state()))
+
+    branch = state["hypothesis_branches"][0]
+    assert branch.opposing_evidence_ids == ["ev-1"]
+    assert branch.gate_status == "blocked"
+    assert branch.disposition == "needs_more_information"
+    assert not state["report"].result.hypotheses
+    assert state["report"].completion_status == "partial"
+
+
 def test_auditor_failure_marks_only_that_branch_incomplete_and_sanitizes_error():
     model = SchemaModel(audit_results=[_audit()] * 3, fail_audit_indexes={0})
     events = []

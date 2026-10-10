@@ -64,6 +64,59 @@ def compute_evidence_support_rate(labels: Sequence[str | None]) -> float | None:
     return sum(label == "supported" for label in scored) / len(scored)
 
 
+def compute_branch_metrics(
+    branches: Sequence[Mapping[str, Any] | Any],
+    reviewed_labels: Mapping[str, str] | Sequence[Mapping[str, Any]],
+    *,
+    evidence_ids: Sequence[str] | None = None,
+) -> dict[str, Any]:
+    """Measure deterministic branch structure; keep human quality null without branch labels."""
+    count = len(branches)
+    inventory = set(evidence_ids) if evidence_ids is not None else None
+    refs: list[tuple[str, set[str] | None]] = []
+    support_coverage = unsupported = applicability_warning = incomplete = 0
+    for branch in branches:
+        supporting = list(_value(branch, "supporting_evidence_ids", []))
+        opposing = list(_value(branch, "opposing_evidence_ids", []))
+        available = _value(branch, "available_evidence_ids", None)
+        allowed = set(available) if available is not None else inventory
+        refs.extend((ref, allowed) for ref in supporting + opposing)
+        support_coverage += bool(supporting or opposing)
+        unsupported += not bool(supporting)
+        applicability_warning += _value(branch, "applicability", "unknown") != "direct"
+        incomplete += _value(branch, "gate_status", "pending") in {"pending", "review_incomplete"}
+
+    if isinstance(reviewed_labels, Mapping):
+        labels = list(reviewed_labels.values())
+    else:
+        labels = [item.get("label") for item in reviewed_labels if isinstance(item, Mapping)]
+    scored_labels = [label for label in labels if label in {"supported", "unsupported"}]
+    integrity = (
+        sum(reference in allowed for reference, allowed in refs) / len(refs)
+        if refs and all(allowed is not None for _, allowed in refs) else None
+    )
+    def ratio(value: int) -> float | None:
+        return value / count if count else None
+    return {
+        "evidence_id_integrity_rate": integrity,
+        "support_opposition_coverage": ratio(support_coverage),
+        "unsupported_candidate_share": ratio(unsupported),
+        "applicability_warning_share": ratio(applicability_warning),
+        "incomplete_review_share": ratio(incomplete),
+        "human_labeled_branch_quality": (
+            sum(label == "supported" for label in scored_labels) / len(scored_labels)
+            if scored_labels else None
+        ),
+        "sample_counts": {"branches": count, "evidence_references": len(refs), "human_labeled_branches": len(scored_labels)},
+        "metric_reasons": {
+            "evidence_id_integrity_rate": "No evidence references or evidence inventory are available."
+            if integrity is None else None,
+            "human_labeled_branch_quality": "No human-labeled branch-quality set is available."
+            if not scored_labels else None,
+        },
+    }
+
+
 def build_evaluation_summary(
     *,
     mode: str,

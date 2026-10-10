@@ -125,16 +125,54 @@ def test_runner_persists_sanitized_failure_without_secret_text(tmp_path, monkeyp
     assert "private-secret" not in " ".join(event.message for event in store.events_after(task.task_id))
 
 
+def test_runner_timeout_marks_running_agent_records_incomplete(tmp_path, monkeypatch):
+    store = SQLiteStore(tmp_path / "agent-timeout.db")
+    task, _ = store.create_task(_request())
+    shared_deps = SimpleNamespace(case_store=None, agent_event_sink=None, agent_result_sink=None)
+
+    class HangingGraph:
+        def __init__(self, deps):
+            self.deps = deps
+
+        async def ainvoke(self, state):
+            started = AgentRunRecord(
+                agent_run_id="run-hanging", task_id=state["task_id"], role="coordinator",
+                stage="intake", status="running", summary="检查输入。", started_at=datetime.now(timezone.utc),
+            )
+            self.deps.agent_event_sink(started)
+            await asyncio.Event().wait()
+
+    monkeypatch.setattr(runner_module, "build_workflow", lambda _mode, deps: HangingGraph(deps))
+    runner = TaskRunner(
+        store, deps_provider=lambda: shared_deps,
+        settings=WorkerSettings(lease_seconds=3, timeout_seconds=1),
+    )
+
+    assert asyncio.run(runner.run_once()) is True
+
+    assert store.get_task(task.task_id).status == "failed"
+    run = store.list_agent_runs(task.task_id)[0]
+    assert run.status == "incomplete"
+    assert run.error_code == "task_interrupted"
+    assert run.completed_at is not None
+
+
 def test_agent_run_and_branch_updates_are_fenced_by_current_lease(tmp_path):
     store = SQLiteStore(tmp_path / "agent-fencing.db")
     task, _ = store.create_task(_request())
     store.claim_next_task("worker-old", lease_seconds=30)
+    running = AgentRunRecord(
+        agent_run_id="expired-run", task_id=task.task_id, role="coordinator", stage="intake",
+        status="running", summary="running", started_at=datetime.now(timezone.utc),
+    )
+    assert store.save_agent_run_for_worker(running, worker_id="worker-old") is True
     with store._connect() as connection:
         connection.execute(
             "UPDATE tasks SET lease_expires_at = ? WHERE task_id = ?",
             ((datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat(), task.task_id),
         )
     assert store.requeue_expired_tasks() == [task.task_id]
+    assert store.list_agent_runs(task.task_id)[0].status == "incomplete"
     store.claim_next_task("worker-new", lease_seconds=30)
 
     record = AgentRunRecord(
@@ -150,4 +188,4 @@ def test_agent_run_and_branch_updates_are_fenced_by_current_lease(tmp_path):
 
     assert store.save_agent_run_for_worker(record, worker_id="worker-old") is False
     assert store.replace_hypothesis_branches_for_worker(task.task_id, [], worker_id="worker-old") is False
-    assert store.list_agent_runs(task.task_id) == []
+    assert [run.status for run in store.list_agent_runs(task.task_id)] == ["incomplete"]

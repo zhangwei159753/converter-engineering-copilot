@@ -395,6 +395,19 @@ class SQLiteStore:
         """Delete cases and extracted candidate text owned by an import."""
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
+            evidence_ids = {
+                row[0] for row in connection.execute(
+                    "SELECT chunk_id FROM import_chunks WHERE import_id = ? UNION SELECT case_id FROM import_cases WHERE import_id = ?",
+                    (import_id, import_id),
+                ).fetchall()
+            }
+            if evidence_ids:
+                for row in connection.execute("SELECT edge_id, evidence_ids_json FROM memory_edges WHERE active = 1").fetchall():
+                    if evidence_ids.intersection(json.loads(row["evidence_ids_json"])):
+                        connection.execute(
+                            "UPDATE memory_edges SET active = 0, updated_at = ? WHERE edge_id = ?",
+                            (_now().isoformat(), row["edge_id"]),
+                        )
             connection.execute(
                 "DELETE FROM cases WHERE case_id IN (SELECT case_id FROM import_cases WHERE import_id = ?)",
                 (import_id,),
@@ -552,6 +565,7 @@ class SQLiteStore:
         recovered: list[str] = []
         for row in rows:
             task_id = row["task_id"]
+            self._mark_running_agent_runs_incomplete(connection, task_id, now, "租约失效，Agent 执行记录标记为未完成。")
             exhausted = int(row["attempt"]) >= int(row["max_attempts"])
             if exhausted:
                 connection.execute(
@@ -659,6 +673,33 @@ class SQLiteStore:
                 now,
             )
         return True
+
+    def mark_running_agent_runs_incomplete_for_worker(self, task_id: str, *, worker_id: str) -> bool:
+        """Close running agent records after interruption while the worker still owns the lease."""
+        now = _now()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            if not self._worker_owns_lease(connection, task_id, worker_id, now):
+                return False
+            self._mark_running_agent_runs_incomplete(connection, task_id, now, "执行被中断，结果未完成。")
+        return True
+
+    @staticmethod
+    def _mark_running_agent_runs_incomplete(
+        connection: sqlite3.Connection, task_id: str, now: datetime, summary: str
+    ) -> None:
+        rows = connection.execute(
+            "SELECT agent_run_id, role FROM agent_runs WHERE task_id = ? AND status = 'running'",
+            (task_id,),
+        ).fetchall()
+        if not rows:
+            return
+        connection.execute(
+            "UPDATE agent_runs SET status = 'incomplete', summary = ?, error_code = 'task_interrupted', completed_at = ? WHERE task_id = ? AND status = 'running'",
+            (summary, now.isoformat(), task_id),
+        )
+        for row in rows:
+            SQLiteStore._insert_event(connection, task_id, f"agent:{row['role']}", "incomplete", summary, now)
 
     @staticmethod
     def _save_agent_run(connection: sqlite3.Connection, record: AgentRunRecord) -> None:

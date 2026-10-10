@@ -45,9 +45,19 @@ Run a live evaluation with the configured provider key:
 uv run python evals/converter_copilot/run_eval.py --mode fault_analysis
 ```
 
+To compare the previous single-workflow baseline with the bounded multi-agent workflow on the same fault-analysis dataset, run:
+
+```powershell
+uv run python evals/converter_copilot/run_eval.py --mode fault_analysis --compare-strategies
+```
+
+This calls both workflows for every example, so expect approximately twice the model calls of one run. It writes one comparison JSON plus a separate review bundle for each strategy under `.data/evaluation_results/`. In the Web app's **人工评测** page, select the comparison JSON under **多 Agent 工作流对比** to view strategy metrics, paired deltas, branch-structure metrics, latency, and budget exhaustion. The JSON is parsed in the browser and is not uploaded. Use the per-strategy review bundles with the existing server-backed manual review flow.
+
 Each run writes a metric summary and a separate `*-review.json` bundle under `.data/evaluation_results/`. In the Web app's **人工评测** page, import that bundle, inspect each claim's captured source excerpt and locator, assign evidence labels, select retrieval gold IDs from the captured evidence inventory, provide a local reviewer identifier, and save. The API stores UTC timestamps and append-only versions in SQLite. Re-reviewing creates a new version and preserves prior labels.
 
 The built-in JSONL records are synthetic and unreviewed. Empty gold sets and missing manual labels produce `null` metrics and `insufficient_labels`; the sample-count fields show what was actually scored. A local reviewer identifier is free text and is not an authenticated account. Human labels describe review of the captured output; they do not validate field facts or maintenance outcomes. Do not use these workflows for unauthorized sensitive data or as a substitute for site procedures.
+
+Paired reports include schema pass rate, citation presence/integrity, timing, agent lifecycle counts, and deterministic hypothesis-branch structure checks. Evidence-ID integrity only checks that cited IDs resolve within the captured evidence inventory. Without human gold labels, retrieval recall, semantic evidence support, and human-labeled branch quality remain unavailable; do not treat model confidence or synthetic fixture results as quality accuracy.
 
 ## Work-order assistance
 

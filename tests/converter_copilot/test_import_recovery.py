@@ -7,7 +7,13 @@ import pytest
 
 from converter_copilot.api.runner import TaskRunner
 from converter_copilot.config import ImportLimits
-from converter_copilot.domain.schemas import CaseRecord, ImportStatus
+from converter_copilot.domain.agent_audit import MemoryEdge, MemoryNode
+from converter_copilot.domain.schemas import (
+    CaseRecord,
+    ImportStatus,
+    TaskCreate,
+    TaskMode,
+)
 from converter_copilot.retrieval.import_validation import retain_source, validate_upload
 from converter_copilot.storage.sqlite_store import SQLiteStore
 
@@ -182,3 +188,32 @@ async def test_interrupted_delete_can_be_retried_without_leaving_source_or_case_
     assert store.list_cases() == []
     assert store.get_import_chunk_ids(source.import_id) == []
     assert index.chunks == {}
+
+
+@pytest.mark.asyncio
+async def test_deleting_import_deactivates_memory_citing_its_chunks(tmp_path):
+    index = MemoryIndex()
+    store, runner, source, _ = _create_incomplete_import(tmp_path, index)
+    await runner.reconcile_imports(source.import_id)
+    task, _ = store.create_task(
+        TaskCreate(mode=TaskMode.FAULT_ANALYSIS, inputs={"equipment_type": "PV inverter", "symptom": "DC overvoltage"}),
+        work_order_id="WO-IMPORT-MEMORY",
+    )
+    with store._connect() as connection:
+        connection.execute("UPDATE tasks SET status = 'completed' WHERE task_id = ?", (task.task_id,))
+    review = store.save_work_order_review(
+        "WO-IMPORT-MEMORY", task.task_id, reviewer="engineer", verdict="accepted", note="reviewed"
+    )
+    equipment = MemoryNode(node_id="equip:import", node_type="equipment", canonical_key="pv", display_name="PV inverter")
+    cause = MemoryNode(node_id="cause:import", node_type="cause", canonical_key="overvoltage", display_name="Overvoltage cause")
+    edge = MemoryEdge(
+        edge_id="edge:import-source", source_node_id=equipment.node_id, relation_type="associated_with_cause",
+        target_node_id=cause.node_id, source_task_id=task.task_id, source_work_order_id="WO-IMPORT-MEMORY",
+        source_review_version=review.version, evidence_ids=[source.chunks[0].chunk_id],
+    )
+    store.upsert_memory_graph([equipment, cause], [edge])
+
+    await runner.delete_import(source.import_id)
+
+    assert store.list_memory_edges(active_only=True) == []
+    assert store.list_memory_edges(active_only=False)[0].active is False

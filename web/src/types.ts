@@ -214,6 +214,49 @@ export interface EvaluationSummary {
   retrieval_recall_at_k: number | null; manual_evidence_support_rate: number | null;
   metric_status: Record<string, string>; metric_sample_counts: Record<string, number>;
 }
+export interface OfflineStrategyEvaluation {
+  workflow_version: string;
+  agent_strategy: string;
+  example_count: number;
+  synthetic_example_count: number;
+  schema_pass_rate: number | null;
+  retrieval_recall_at_k: number | null;
+  citation_coverage: number | null;
+  citation_integrity_rate: number | null;
+  manual_evidence_support_rate: number | null;
+  metric_sample_counts: Record<string, number>;
+  branch_metrics: {
+    evidence_id_integrity_rate: number | null;
+    support_opposition_coverage: number | null;
+    unsupported_candidate_share: number | null;
+    applicability_warning_share: number | null;
+    incomplete_review_share: number | null;
+    human_labeled_branch_quality: number | null;
+    sample_counts: Record<string, number>;
+  };
+  agent_latency_ms: { mean: number | null; sample_count: number; reason?: string | null };
+  agent_run_counts: Record<string, number>;
+  budget_exhaustion_count: number;
+  provider_usage?: Record<string, number> | null;
+  provider_usage_unavailable_reason?: string | null;
+}
+export interface OfflineEvaluationReport {
+  mode: string;
+  dataset_version: string;
+  dataset?: string;
+  strategies?: Record<string, OfflineStrategyEvaluation>;
+  paired_comparison?: {
+    strategy_order: string[];
+    paired_example_count: number;
+    metric_deltas_second_minus_first: Record<string, number | null>;
+    mean_latency_delta_ms_second_minus_first: number | null;
+    interpretation: string;
+  };
+  agent_strategy?: string;
+  workflow_version?: string;
+  example_count?: number;
+  [key: string]: unknown;
+}
 export interface EvaluationReviewEvent {
   review_id: string; label_version: number; reviewer_id: string; reviewed_at: string;
   evidence_labels: EvaluationExample["evidence_labels"]; expected_retrieval_ids: string[]; note: string | null;
