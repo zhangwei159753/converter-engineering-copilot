@@ -6,6 +6,8 @@ This walkthrough uses only synthetic demonstration cases. It requires a configur
 
 Use the local setup in the root [README](../README.md), or start the Docker Compose services. Check `/api/health` and `/api/ready`; the latter checks that SQLite can acquire a write lock within one second and that the worker is running.
 
+Uploads are limited by default to 20 MiB, 200 PDF pages, 10,000 CSV rows, and 2,000 chunks. The local source ledger reports validation and indexing state. A completed import only means the synthetic source passed file checks and was indexed; it does not make the example a real incident or validate a maintenance outcome. The CSV rows retain the `synthetic_demo_fixture` marker, which the workbench displays explicitly.
+
 ## 2. Import synthetic maintenance rows
 
 In the workbench, choose **导入技术资料** and upload [`examples/demo_maintenance_cases.csv`](../examples/demo_maintenance_cases.csv). The importer indexes each CSV row and stores one structured case per row. The `record_type` column labels each row `synthetic_demo_fixture`; the source attribution and explanation are also stated in this guide and the evaluation records.
