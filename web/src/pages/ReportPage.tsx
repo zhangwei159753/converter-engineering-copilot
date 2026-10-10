@@ -9,6 +9,7 @@ import type { ConverterReport, Evidence } from "../types";
 function reportMarkdown(report: ConverterReport) {
   const hypotheses = report.result.hypotheses ?? [];
   const comparisons = report.result.comparisons ?? [];
+  const cases = report.result.matches ?? [];
   return [
     `# 变流器工程分析报告`,
     ``,
@@ -20,6 +21,7 @@ function reportMarkdown(report: ConverterReport) {
     `## 核验清单`,
     ...(report.result.checks ?? []).map((item) => `- ${item}`),
     ...(report.mode === "technical_research" ? [``, `## 技术路线对照`, ...comparisons.map((item) => `- **${String(item.item)}**：${String(item.method_or_value)}；条件：${String(item.experimental_conditions ?? "未报告")}；来源：${(item.evidence_ids as string[] | undefined)?.join(", ") ?? "无"}`), ``, `## 研究局限`, ...(report.result.limitations ?? []).map((item) => `- ${item}`), ``, `## 可复现实验步骤`, ...(report.result.experiment_steps ?? []).map((item) => `- ${item}`)] : []),
+    ...(report.mode === "case_retrieval" ? [``, `## 相似检修案例`, ...cases.map((item) => `- **${String(item.case_id)}**（相似度 ${Math.round(Number(item.similarity_score ?? 0) * 100)}%）：${String(item.symptom ?? "未记录现象")}；设备：${String(item.equipment_type ?? "未记录")}；原因：${String(item.cause ?? "未记录")}；验证：${String(item.validation_result ?? "未记录")}；处置：${String(item.handling_result ?? "未记录")}；差异：${(item.differing_fields as string[] | undefined)?.join("；") ?? "无"}；来源：${(item.evidence_ids as string[] | undefined)?.join(", ") ?? "无"}`)] : []),
     ``,
     `## 质量提示`,
     ...report.quality_warnings.map((item) => `- ${item}`),

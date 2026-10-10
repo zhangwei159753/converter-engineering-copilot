@@ -20,7 +20,7 @@ export default function WorkspacePage() {
     listTasks().then(setTasks).catch(() => setTasks([]));
   }, []);
 
-  async function submit(mode: "fault_analysis" | "technical_research", input: Record<string, unknown>) {
+  async function submit(mode: "fault_analysis" | "technical_research" | "case_retrieval", input: Record<string, unknown>) {
     setSubmitting(true);
     setError("");
     try {

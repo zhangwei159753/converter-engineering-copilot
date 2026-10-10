@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import inspect
+from difflib import SequenceMatcher
 from datetime import datetime, timezone
 from typing import Any
 
@@ -13,6 +14,10 @@ from converter_copilot.agent.state import ConverterState
 from converter_copilot.domain.evidence import validate_report_evidence
 from converter_copilot.domain.schemas import (
     Claim,
+    CaseMatch,
+    CaseRecord,
+    CaseRetrievalInput,
+    CaseRetrievalReport,
     ConverterReport,
     Evidence,
     FaultAnalysisInput,
@@ -257,6 +262,159 @@ def make_technical_research_generate_node(deps):
         return {"report": report, "clarification_questions": []}
 
     return generate
+
+
+def make_case_retrieval_node(deps):
+    """Create local case ranking, structured comparison, and citation node."""
+
+    async def retrieve(state: ConverterState) -> dict[str, Any]:
+        request = CaseRetrievalInput.model_validate(state["inputs"])
+        query = " ".join(
+            part
+            for part in [request.equipment_type or "", request.symptom, str(request.operating_conditions)]
+            if part
+        )
+        chunks = await asyncio.to_thread(deps.vector_index.search, query, limit=10)
+        cases = deps.case_store.list_cases() if deps.case_store is not None else []
+        chunks_by_id = {chunk.chunk_id: chunk for chunk in chunks}
+        ranked: dict[str, tuple[CaseRecord, float, Any]] = {}
+
+        for case in cases:
+            linked_chunks = [chunks_by_id[evidence_id] for evidence_id in case.evidence_ids if evidence_id in chunks_by_id]
+            for chunk in linked_chunks:
+                if float(chunk.score) < 0.20:
+                    continue
+                equipment_score = _field_similarity(request.equipment_type, case.equipment_type, missing_neutral=0.5)
+                symptom_score = SequenceMatcher(None, request.symptom.casefold(), case.symptom.casefold()).ratio()
+                similarity = 0.55 * max(0.0, min(float(chunk.score), 1.0)) + 0.2 * equipment_score + 0.25 * symptom_score
+                if similarity < 0.30:
+                    continue
+                previous = ranked.get(case.case_id)
+                if previous is None or similarity > previous[1]:
+                    ranked[case.case_id] = (case, similarity, chunk)
+
+        matches: list[CaseMatch] = []
+        evidence: list[Evidence] = []
+        claims: list[Claim] = []
+        incomplete = False
+        for case_id, (case, similarity, chunk) in sorted(ranked.items(), key=lambda item: item[1][1], reverse=True):
+            matching_fields, differing_fields, limitations = _compare_case_fields(request, case)
+            matches.append(
+                CaseMatch(
+                    case_id=case_id,
+                    similarity_score=round(similarity, 4),
+                    matching_fields=matching_fields,
+                    differing_fields=differing_fields,
+                    applicability_limitations=limitations,
+                    evidence_ids=[chunk.chunk_id],
+                    equipment_type=case.equipment_type,
+                    operating_conditions=case.operating_conditions,
+                    symptom=case.symptom,
+                    cause=case.cause,
+                    validation_result=case.validation_result,
+                    handling_result=case.handling_result,
+                )
+            )
+            evidence.append(
+                Evidence(
+                    evidence_id=chunk.chunk_id,
+                    task_id=state["task_id"],
+                    title=chunk.filename,
+                    source_type="local_document",
+                    excerpt=chunk.text,
+                    document_id=chunk.document_id,
+                    locator=chunk.locator,
+                    accessed_at=datetime.now(timezone.utc),
+                    source_status="available",
+                )
+            )
+            claims.append(
+                Claim(
+                    claim_id=f"claim-{len(claims) + 1}",
+                    text=f"Case {case.case_id} shares some structured fields with the reported symptom; similarity is a retrieval cue, not proof of cause.",
+                    claim_type="inference",
+                    evidence_ids=[chunk.chunk_id],
+                )
+            )
+            incomplete = incomplete or bool(limitations)
+
+        result = CaseRetrievalReport(matches=matches)
+        warning = "Case similarity helps locate prior records; it does not establish causality or guarantee the same repair outcome."
+        quality_warnings = [warning]
+        if not matches:
+            quality_warnings.append("No linked maintenance case exceeded the minimum similarity threshold.")
+        provisional = ConverterReport(
+            task_id=state["task_id"],
+            mode=TaskMode.CASE_RETRIEVAL,
+            result=result,
+            claims=claims,
+            evidence=evidence,
+            quality_warnings=quality_warnings,
+            completion_status="partial",
+        )
+        check = validate_report_evidence(provisional)
+        statuses = {
+            **{claim_id: "supported" for claim_id in check.supported_claim_ids},
+            **{claim_id: "conflicting" for claim_id in check.conflicting_claim_ids},
+            **{claim_id: "unverified" for claim_id in check.unverified_claim_ids},
+        }
+        claims = [claim.model_copy(update={"verification_status": statuses[claim.claim_id]}) for claim in claims]
+        report = provisional.model_copy(
+            update={
+                "claims": claims,
+                "quality_warnings": quality_warnings + check.warnings,
+                "completion_status": "partial" if incomplete or not matches or check.warnings else "completed",
+            }
+        )
+        return {"report": report, "evidence": evidence, "clarification_questions": []}
+
+    return retrieve
+
+
+def _field_similarity(query_value: str | None, case_value: str | None, *, missing_neutral: float = 0.0) -> float:
+    if not query_value or not case_value:
+        return missing_neutral
+    return SequenceMatcher(None, query_value.casefold().strip(), case_value.casefold().strip()).ratio()
+
+
+def _compare_case_fields(request: CaseRetrievalInput, case: CaseRecord) -> tuple[list[str], list[str], list[str]]:
+    matching: list[str] = []
+    differing: list[str] = []
+    limitations: list[str] = []
+
+    if case.equipment_type:
+        if _field_similarity(request.equipment_type, case.equipment_type) >= 0.9:
+            matching.append("equipment_type")
+        elif request.equipment_type:
+            differing.append(f"equipment_type: {request.equipment_type} vs {case.equipment_type}")
+    else:
+        limitations.append("Prior case does not record equipment type.")
+
+    symptom_similarity = _field_similarity(request.symptom, case.symptom)
+    if symptom_similarity >= 0.7:
+        matching.append("symptom")
+    else:
+        differing.append(f"symptom: {request.symptom} vs {case.symptom}")
+
+    condition_keys = set(request.operating_conditions) | set(case.operating_conditions)
+    for key in sorted(condition_keys):
+        query_value = request.operating_conditions.get(key)
+        case_value = case.operating_conditions.get(key)
+        field = f"operating_conditions.{key}"
+        if query_value is None or case_value is None:
+            limitations.append(f"Prior case has incomplete operating condition '{key}'.")
+        elif str(query_value).strip().casefold() == str(case_value).strip().casefold():
+            matching.append(field)
+        else:
+            differing.append(f"{field}: current {query_value} vs case {case_value}")
+
+    if not case.cause:
+        limitations.append("Prior case does not record a validated cause.")
+    if not case.validation_result:
+        limitations.append("Prior case does not record a validation result.")
+    if not case.handling_result:
+        limitations.append("Prior case does not record a handling outcome.")
+    return matching, differing, limitations
 
 
 def _web_evidence(item: Any, task_id: str) -> Evidence:

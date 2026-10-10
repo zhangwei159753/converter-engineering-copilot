@@ -133,6 +133,12 @@ class CaseMatch(BaseModel):
     differing_fields: list[str] = Field(default_factory=list)
     applicability_limitations: list[str] = Field(default_factory=list)
     evidence_ids: list[str] = Field(default_factory=list)
+    equipment_type: str | None = None
+    operating_conditions: dict[str, object] = Field(default_factory=dict)
+    symptom: str | None = None
+    cause: str | None = None
+    validation_result: str | None = None
+    handling_result: str | None = None
 
 
 class CaseRetrievalReport(BaseModel):

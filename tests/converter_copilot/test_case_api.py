@@ -58,3 +58,34 @@ def test_case_import_returns_400_for_malformed_csv(tmp_path):
     client, _, _ = _client(tmp_path)
     response = client.post("/api/cases/import", files={"file": ("cases.csv", b'"unterminated')})
     assert response.status_code == 400
+
+
+def test_markdown_case_import_extracts_structured_record_with_source_locator(tmp_path):
+    class ExtractModel:
+        def with_structured_output(self, schema):
+            return self
+
+        async def ainvoke(self, messages):
+            return {"cases": [{
+                "equipment_type": "PV inverter",
+                "symptom": "DC bus overvoltage",
+                "cause": "Braking resistor open circuit",
+                "validation_result": "Resistance measurement was open",
+                "handling_result": "Replaced resistor",
+                "operating_conditions": {"load": "75%"},
+            }]}
+
+    store = SQLiteStore(tmp_path / "extracted-cases.db")
+    index = CaptureIndex()
+    deps = WorkflowDeps(model=ExtractModel(), search=EmptySearch(), vector_index=index)
+    runner = TaskRunner(store=store, deps_provider=lambda: deps)
+    with TestClient(create_app(runner=runner)) as client:
+        response = client.post(
+            "/api/cases/import",
+            files={"file": ("service-note.md", "# Repair log\n\nDC bus overvoltage after startup; inspect braking resistor.\n", "text/markdown")},
+        )
+    assert response.status_code == 201
+    saved = store.list_cases()[0]
+    assert saved.symptom == "DC bus overvoltage"
+    assert saved.evidence_ids == [index.added[0].chunk_id]
+    assert response.json()["imported_case_count"] == 1

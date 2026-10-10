@@ -11,6 +11,7 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 from converter_copilot.api.models import CaseImportResult
 from converter_copilot.api.runner import TaskRunner
 from converter_copilot.domain.schemas import CaseRecord
+from converter_copilot.retrieval.case_extractor import extract_case_records
 from converter_copilot.retrieval.document_loader import DocumentLoadError, load_document
 
 
@@ -37,6 +38,16 @@ def build_case_router(runner: TaskRunner) -> APIRouter:
             raise HTTPException(status_code=503, detail=str(error)) from error
 
         imported_cases = 0
+        if Path(filename).suffix.lower() in {".pdf", ".md"}:
+            try:
+                deps = runner.deps_provider()
+                for chunk in chunks[:8]:
+                    extracted = await extract_case_records(chunk.text, evidence_id=chunk.chunk_id, model=deps.model)
+                    for case in extracted:
+                        runner.store.save_case(case)
+                        imported_cases += 1
+            except RuntimeError as error:
+                raise HTTPException(status_code=503, detail=str(error)) from error
         if Path(filename).suffix.lower() == ".csv":
             try:
                 rows = csv.DictReader(io.StringIO(payload.decode("utf-8-sig"), newline=""), strict=True)

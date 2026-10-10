@@ -8,6 +8,7 @@ from langgraph.graph import END, START, StateGraph
 
 from converter_copilot.agent.nodes import (
     make_clarification_node,
+    make_case_retrieval_node,
     make_generate_node,
     make_intake_node,
     make_research_node,
@@ -37,13 +38,19 @@ class WorkflowDeps:
     model: BaseChatModel
     search: SearchAdapter
     vector_index: VectorSearch
+    case_store: object | None = None
 
 
 def build_workflow(mode: TaskMode, deps: WorkflowDeps):
     """Compile the requested workflow with explicitly injected dependencies."""
-    if mode not in {TaskMode.FAULT_ANALYSIS, TaskMode.TECHNICAL_RESEARCH}:
+    if mode not in {TaskMode.FAULT_ANALYSIS, TaskMode.TECHNICAL_RESEARCH, TaskMode.CASE_RETRIEVAL}:
         raise NotImplementedError(f"Workflow mode {mode.value} is not registered yet.")
     graph = StateGraph(ConverterState)
+    if mode == TaskMode.CASE_RETRIEVAL:
+        graph.add_node("case_retrieval", make_case_retrieval_node(deps))
+        graph.add_edge(START, "case_retrieval")
+        graph.add_edge("case_retrieval", END)
+        return graph.compile()
     graph.add_node("research", make_research_node(deps))
     if mode == TaskMode.FAULT_ANALYSIS:
         graph.add_node("intake", make_intake_node())

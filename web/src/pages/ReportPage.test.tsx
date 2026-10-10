@@ -44,4 +44,27 @@ describe("ReportPage", () => {
     expect(screen.getByText("结果受调制策略影响")).toBeInTheDocument();
     expect(screen.getByText("统一开关频率后测量 THD")).toBeInTheDocument();
   });
+
+  it("renders case similarity, field differences, outcome, and source evidence", async () => {
+    vi.mocked(api.getReport).mockResolvedValue({
+      task_id: "case-task-1", mode: "case_retrieval", completion_status: "partial",
+      result: { matches: [{
+        case_id: "case-17", similarity_score: 0.82, symptom: "启动后过流", equipment_type: "光伏逆变器",
+        cause: "驱动电源异常", validation_result: "驱动电压偏低", handling_result: "更换驱动板后复测通过",
+        operating_conditions: { load: "25%" }, matching_fields: ["equipment_type", "symptom"],
+        differing_fields: ["operating_conditions.load: current 50% vs case 25%"],
+        applicability_limitations: ["历史案例未记录环境温度。"], evidence_ids: ["case-ev-17"],
+      }] },
+      claims: [],
+      evidence: [{ evidence_id: "case-ev-17", task_id: "case-task-1", title: "维护记录", source_type: "local_document", excerpt: "启动过流检修记录", document_id: "doc-17", locator: "row 8", accessed_at: "2026-10-10T00:00:00Z", related_claim_ids: [], source_status: "available" }],
+      quality_warnings: ["相似度不代表因果关系。"],
+    });
+    render(<MemoryRouter initialEntries={["/tasks/case-task-1/report"]}><Routes><Route path="/tasks/:taskId/report" element={<ReportPage />} /></Routes></MemoryRouter>);
+    expect(await screen.findByText(/case-17/)).toBeInTheDocument();
+    expect(screen.getByText("82")).toBeInTheDocument();
+    expect(screen.getByText("更换驱动板后复测通过")).toBeInTheDocument();
+    expect(screen.getByText(/current 50% vs case 25%/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "case-ev-17" }));
+    expect(await screen.findByText("维护记录")).toBeInTheDocument();
+  });
 });

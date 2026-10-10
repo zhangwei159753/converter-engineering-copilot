@@ -14,13 +14,13 @@ describe("WorkspacePage", () => {
     vi.mocked(api.listTasks).mockResolvedValue([]);
   });
 
-  it("shows all modes and enables the implemented analysis and research workflows", async () => {
+  it("shows all three implemented workflows as available", async () => {
     render(<MemoryRouter><WorkspacePage /></MemoryRouter>);
     expect(await screen.findByText("故障现象分析")).toBeInTheDocument();
     expect(screen.getByText("技术调研与实验设计")).toBeInTheDocument();
     expect(screen.getByText("检修案例检索")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /技术调研与实验设计/ })).toBeEnabled();
-    expect(screen.getByRole("button", { name: /检修案例检索/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /检修案例检索/ })).toBeEnabled();
   });
 
   it("submits a technical research question", async () => {
@@ -34,6 +34,20 @@ describe("WorkspacePage", () => {
     fireEvent.change(screen.getByLabelText("技术范围"), { target: { value: "并网光伏" } });
     fireEvent.click(screen.getByRole("button", { name: "开始调研" }));
     await waitFor(() => expect(api.createTask).toHaveBeenCalledWith(expect.objectContaining({ mode: "technical_research" })));
+  });
+
+  it("submits a case retrieval request with optional equipment and operating context", async () => {
+    vi.mocked(api.createTask).mockResolvedValue({ task: {
+      task_id: "case-task-1", mode: "case_retrieval", status: "queued", inputs: {},
+      created_at: "2026-10-10T00:00:00Z", updated_at: "2026-10-10T00:00:00Z",
+    } });
+    render(<MemoryRouter><WorkspacePage /></MemoryRouter>);
+    fireEvent.click(screen.getByRole("button", { name: "检修案例检索" }));
+    fireEvent.change(screen.getByLabelText("故障现象"), { target: { value: "启动后过流" } });
+    fireEvent.change(screen.getByLabelText("设备类型"), { target: { value: "光伏逆变器" } });
+    fireEvent.change(screen.getByLabelText("运行工况"), { target: { value: "负载 40%，环境温度 30℃" } });
+    fireEvent.click(screen.getByRole("button", { name: "检索相似案例" }));
+    await waitFor(() => expect(api.createTask).toHaveBeenCalledWith(expect.objectContaining({ mode: "case_retrieval" })));
   });
 
   it("validates the fault form and submits a valid task", async () => {

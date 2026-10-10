@@ -20,7 +20,7 @@ class TaskRunner:
     """Run one background graph per persisted task, with durable events."""
 
     MAX_RETRIES = 2
-    _AVAILABLE_MODES = {TaskMode.FAULT_ANALYSIS, TaskMode.TECHNICAL_RESEARCH}
+    _AVAILABLE_MODES = {TaskMode.FAULT_ANALYSIS, TaskMode.TECHNICAL_RESEARCH, TaskMode.CASE_RETRIEVAL}
 
     def __init__(
         self,
@@ -41,7 +41,9 @@ class TaskRunner:
         """Validate availability, persist a queued task, then schedule one run."""
         if request.mode not in self._AVAILABLE_MODES:
             raise WorkflowUnavailableError(f"The {request.mode.value} workflow is not available yet.")
-        graph = build_workflow(request.mode, self.deps_provider())
+        deps = self.deps_provider()
+        deps.case_store = self.store
+        graph = build_workflow(request.mode, deps)
         record = self.store.create_task(request)
         self.store.append_event(record.task_id, stage="queued", status="queued", message="任务已排队。")
         self._active[record.task_id] = asyncio.create_task(self._execute(record, graph))
