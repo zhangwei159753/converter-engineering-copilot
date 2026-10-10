@@ -42,6 +42,26 @@ class AgentRunRecord(BaseModel):
         return values
 
 
+class BranchAuditResult(BaseModel):
+    """Structured, evidence-ID-only review returned for one hypothesis branch."""
+
+    supporting_evidence_ids: list[str] = Field(default_factory=list, max_length=100)
+    opposing_evidence_ids: list[str] = Field(default_factory=list, max_length=100)
+    missing_fields: list[str] = Field(default_factory=list, max_length=100)
+    checks: list[str] = Field(default_factory=list, max_length=100)
+    rationale_summary: str = Field(default="", max_length=2000)
+
+    @field_validator("supporting_evidence_ids", "opposing_evidence_ids")
+    @classmethod
+    def evidence_ids_are_unique(cls, values: list[str]) -> list[str]:
+        """Reject blank or duplicate evidence IDs in one branch audit."""
+        if any(not value.strip() for value in values):
+            raise ValueError("Evidence IDs must be non-empty strings.")
+        if len(values) != len(set(values)):
+            raise ValueError("Evidence IDs must be unique within a branch audit.")
+        return values
+
+
 class HypothesisBranch(BaseModel):
     """A bounded fault candidate and its evidence audit outcome."""
 

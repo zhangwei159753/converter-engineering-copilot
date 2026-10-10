@@ -94,7 +94,7 @@ def test_fault_analysis_generates_typed_report_with_citations():
             checks=["Measure the DC bus voltage."],
         )
     )
-    graph = build_workflow(TaskMode.FAULT_ANALYSIS, _deps(model, vector=FakeVectorIndex([_chunk()])))
+    graph = build_workflow(TaskMode.FAULT_ANALYSIS, _deps(model, vector=FakeVectorIndex([_chunk()])), agent_strategy="baseline")
     state = asyncio.run(graph.ainvoke(_state()))
     assert state["report"].result.hypotheses[0].hypothesis == "Braking unit failure"
     assert state["report"].claims[0].evidence_ids == ["chunk-1"]
@@ -125,7 +125,7 @@ def test_uncited_hypotheses_are_omitted_but_their_checks_remain_visible():
             checks=["Measure the DC bus voltage."],
         )
     )
-    graph = build_workflow(TaskMode.FAULT_ANALYSIS, _deps(model, vector=FakeVectorIndex([_chunk()])))
+    graph = build_workflow(TaskMode.FAULT_ANALYSIS, _deps(model, vector=FakeVectorIndex([_chunk()])), agent_strategy="baseline")
     report = asyncio.run(graph.ainvoke(_state()))["report"]
 
     assert [item.hypothesis for item in report.result.hypotheses] == ["Braking unit failure"]
@@ -144,7 +144,7 @@ def test_schema_validation_error_retries_once_and_marks_recovered_report_partial
         )]
     )
     model = SequenceStructuredModel([{"hypotheses": [{"confidence": "certain"}]}, valid])
-    graph = build_workflow(TaskMode.FAULT_ANALYSIS, _deps(model, vector=FakeVectorIndex([_chunk()])))
+    graph = build_workflow(TaskMode.FAULT_ANALYSIS, _deps(model, vector=FakeVectorIndex([_chunk()])), agent_strategy="baseline")
 
     report = asyncio.run(graph.ainvoke(_state()))["report"]
 
@@ -162,7 +162,7 @@ def test_tentative_synthetic_source_cannot_support_definitive_cause():
         confidence="high", confidence_basis="单条合成假设。", supporting_evidence_ids=["chunk-1"],
         checks=["核对温度趋势。"],
     )]))
-    graph = build_workflow(TaskMode.FAULT_ANALYSIS, _deps(model, vector=FakeVectorIndex([source])))
+    graph = build_workflow(TaskMode.FAULT_ANALYSIS, _deps(model, vector=FakeVectorIndex([source])), agent_strategy="baseline")
 
     report = asyncio.run(graph.ainvoke(_state()))["report"]
 
@@ -174,7 +174,7 @@ def test_tentative_synthetic_source_cannot_support_definitive_cause():
 
 def test_missing_operating_conditions_requests_clarification_without_model_call():
     model = FakeStructuredModel(FaultAnalysisReport())
-    graph = build_workflow(TaskMode.FAULT_ANALYSIS, _deps(model))
+    graph = build_workflow(TaskMode.FAULT_ANALYSIS, _deps(model), agent_strategy="baseline")
     request = _state(conditions={})
     request["inputs"]["fault_code"] = "DC_OV_017"
     state = asyncio.run(graph.ainvoke(request))
@@ -187,7 +187,7 @@ def test_missing_operating_conditions_requests_clarification_without_model_call(
 
 def test_no_retrieval_results_returns_partial_report_without_unsupported_claims():
     model = FakeStructuredModel(FaultAnalysisReport())
-    graph = build_workflow(TaskMode.FAULT_ANALYSIS, _deps(model))
+    graph = build_workflow(TaskMode.FAULT_ANALYSIS, _deps(model), agent_strategy="baseline")
     state = asyncio.run(graph.ainvoke(_state()))
     assert state["report"].result.hypotheses == []
     assert state["report"].claims == []
@@ -221,7 +221,7 @@ def test_conflicting_web_source_marks_generated_claim_conflicting():
             ]
         )
     )
-    graph = build_workflow(TaskMode.FAULT_ANALYSIS, _deps(model, search=FakeSearch([evidence])))
+    graph = build_workflow(TaskMode.FAULT_ANALYSIS, _deps(model, search=FakeSearch([evidence])), agent_strategy="baseline")
     state = asyncio.run(graph.ainvoke(_state()))
     assert state["report"].claims[0].verification_status == "conflicting"
     assert state["report"].completion_status == "partial"

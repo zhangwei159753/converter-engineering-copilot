@@ -118,3 +118,27 @@ def tracing_run_config(*, task_id: str, mode: str) -> dict:
         "tags": ["converter-copilot", f"task:{task_id}", f"mode:{mode}"],
         "metadata": {"task_id": task_id, "mode": mode},
     }
+
+
+@dataclass(frozen=True)
+class AgentBudget:
+    """Hard ceilings for one collaborative fault-analysis task."""
+
+    max_hypotheses: int = 3
+    max_parallel_auditors: int = 3
+    max_audit_passes: int = 1
+    max_model_calls: int = 10
+
+    def __post_init__(self) -> None:
+        """Reject invalid values and any attempt to exceed product hard limits."""
+        limits = {
+            "max_hypotheses": (self.max_hypotheses, 3),
+            "max_parallel_auditors": (self.max_parallel_auditors, 3),
+            "max_audit_passes": (self.max_audit_passes, 1),
+            "max_model_calls": (self.max_model_calls, 10),
+        }
+        for name, (value, ceiling) in limits.items():
+            if value < 1:
+                raise ValueError(f"{name} must be positive.")
+            if value > ceiling:
+                raise ValueError(f"{name} exceeds the hard maximum of {ceiling}.")

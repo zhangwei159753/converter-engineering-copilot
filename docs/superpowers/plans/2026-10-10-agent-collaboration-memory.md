@@ -71,8 +71,8 @@ Expected: PASS; previous schema 7 data remains readable and new records are quer
 
 **Files:**
 - Create: `src/converter_copilot/agent/audit_prompts.py`
+- Create: `src/converter_copilot/agent/collaboration.py`
 - Modify: `src/converter_copilot/agent/state.py`
-- Modify: `src/converter_copilot/agent/nodes.py`
 - Modify: `src/converter_copilot/agent/workflows.py`
 - Modify: `src/converter_copilot/agent/prompts.py`
 - Modify: `src/converter_copilot/config.py`
@@ -85,19 +85,19 @@ Expected: PASS; previous schema 7 data remains readable and new records are quer
 - Extend `ConverterState` with `agent_runs`, `hypothesis_branches`, `agent_budget_remaining`, and `agent_warnings`; keep `inputs`, `evidence`, and `report` compatible.
 - Keep technical-research and case-retrieval graph branches unchanged in this version.
 
-- [ ] **Step 1: Write failing workflow tests** for role ordering, maximum three branches, bounded audit calls, evidence ID integrity, partial branch on auditor error, and legacy report compatibility.
-- [ ] **Step 2: Run the focused tests to confirm they fail for missing collaboration behavior.**
+- [x] **Step 1: Write failing workflow tests** for role ordering, maximum three branches, bounded audit calls, evidence ID integrity, partial branch on auditor error, and legacy report compatibility.
+- [x] **Step 2: Run the focused tests to confirm they fail for missing collaboration behavior.**
 
 Run: `python -m pytest tests/converter_copilot/test_agent_collaboration_workflow.py -q`
 
 Expected: FAIL before the new graph stages are implemented.
 
-- [ ] **Step 3: Add role-specific structured output contracts** for candidate hypotheses and branch audits; prompts request concise rationale summaries and exact evidence IDs only.
-- [ ] **Step 4: Implement coordinator planning and budget accounting** after intake; if required context is missing, route to clarification without spending hypothesis/audit calls.
-- [ ] **Step 5: Implement bounded hypothesis generation and parallel per-branch audit** using injected model/search dependencies; cap roots at 3, audit each branch once, and preserve failed branches as incomplete.
-- [ ] **Step 6: Implement deterministic evidence gate** using existing evidence status/applicability and citation validation; model confidence cannot override absent support, explicit conflict, or incompatible equipment applicability.
-- [ ] **Step 7: Synthesize the existing `FaultAnalysisReport` and `ConverterReport`** from passing/qualified branches, preserving claims/evidence IDs and adding safe quality warnings for omitted/incomplete branches.
-- [ ] **Step 8: Run the focused workflow and evidence-quality tests.**
+- [x] **Step 3: Add role-specific structured output contracts** for candidate hypotheses and branch audits; prompts request concise rationale summaries and exact evidence IDs only.
+- [x] **Step 4: Implement coordinator planning and budget accounting** after intake; if required context is missing, route to clarification without spending hypothesis/audit calls.
+- [x] **Step 5: Implement bounded hypothesis generation and parallel per-branch audit** using injected model/search dependencies; cap roots at 3, audit each branch once, and preserve failed branches as incomplete.
+- [x] **Step 6: Implement deterministic evidence gate** using existing evidence status/applicability and citation validation; model confidence cannot override absent support, explicit conflict, or incompatible equipment applicability.
+- [x] **Step 7: Synthesize the existing `FaultAnalysisReport` and `ConverterReport`** from passing/qualified branches, preserving claims/evidence IDs and adding safe quality warnings for omitted/incomplete branches.
+- [x] **Step 8: Run the focused workflow and evidence-quality tests.**
 
 Run: `python -m pytest tests/converter_copilot/test_agent_collaboration_workflow.py tests/converter_copilot/test_evidence_quality.py -q`
 
