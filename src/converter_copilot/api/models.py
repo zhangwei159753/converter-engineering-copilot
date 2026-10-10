@@ -6,6 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator
 
 from converter_copilot.domain.agent_audit import AgentRunRecord, HypothesisBranch
+from converter_copilot.domain.memory import MemoryMatch
 from converter_copilot.domain.schemas import ImportStatus, TaskRecord
 
 
@@ -57,6 +58,13 @@ class HypothesisBranchesResponse(BaseModel):
 
     task_id: str
     items: list[HypothesisBranch]
+
+
+class MemoryMatchesResponse(BaseModel):
+    """Non-synthetic reviewed memory results with source case provenance."""
+
+    items: list[MemoryMatch]
+    synthetic_demo: Literal[False] = False
 
 
 class CaseImportResult(BaseModel):

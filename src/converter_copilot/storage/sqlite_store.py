@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 import sqlite3
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -825,6 +826,106 @@ class SQLiteStore:
 
     def upsert_memory_graph(self, nodes: list[MemoryNode], edges: list[MemoryEdge]) -> None:
         """Persist non-synthetic graph facts only for accepted, linked reviews."""
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            self._upsert_memory_graph(connection, nodes, edges)
+
+    def replace_reviewed_memory_projection(
+        self,
+        work_order_id: str,
+        task_id: str,
+        review_version: int,
+        nodes: list[MemoryNode],
+        edges: list[MemoryEdge],
+    ) -> int:
+        """Atomically replace a source case's active memory with its latest accepted review."""
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            latest = connection.execute(
+                "SELECT MAX(version) AS version FROM work_order_review_events WHERE work_order_id = ? AND task_id = ?",
+                (work_order_id, task_id),
+            ).fetchone()
+            verdict = connection.execute(
+                "SELECT verdict FROM work_order_review_events WHERE work_order_id = ? AND task_id = ? AND version = ?",
+                (work_order_id, task_id, review_version),
+            ).fetchone()
+            if latest is None or latest["version"] != review_version:
+                return 0
+            if (
+                verdict is None
+                or verdict["verdict"] != "accepted"
+            ):
+                connection.execute(
+                    "UPDATE memory_edges SET active = 0, updated_at = ? WHERE source_work_order_id = ? AND source_task_id = ?",
+                    (_now().isoformat(), work_order_id, task_id),
+                )
+                return 0
+            if any(
+                edge.source_work_order_id != work_order_id
+                or edge.source_task_id != task_id
+                or edge.source_review_version != review_version
+                for edge in edges
+            ):
+                raise ValueError("Memory projection provenance does not match its accepted review.")
+            version_filter = "AND source_review_version <> ?" if edges else ""
+            params: tuple[object, ...] = (work_order_id, task_id, review_version) if edges else (work_order_id, task_id)
+            connection.execute(
+                f"UPDATE memory_edges SET active = 0, updated_at = ? WHERE source_work_order_id = ? AND source_task_id = ? {version_filter}",
+                (_now().isoformat(), *params),
+            )
+            self._upsert_memory_graph(connection, nodes, edges)
+            return len(edges)
+
+    def search_memory_rows(
+        self, *, query: str | None, equipment_type: str | None, limit: int
+    ) -> list[sqlite3.Row]:
+        """Search active cause relations whose source review is still the latest accepted version."""
+        clauses = [
+            "cause_edge.relation_type = 'associated_with_cause'",
+            "cause_edge.active = 1",
+            "cause_edge.synthetic_demo = 0",
+            "review.verdict = 'accepted'",
+            "cause_edge.source_review_version = (SELECT MAX(latest.version) FROM work_order_review_events latest WHERE latest.work_order_id = cause_edge.source_work_order_id AND latest.task_id = cause_edge.source_task_id)",
+        ]
+        params: list[object] = []
+        if query:
+            clauses.append("lower(equipment.display_name || ' ' || COALESCE(symptom.display_name, '') || ' ' || cause.display_name) LIKE ?")
+            params.append(f"%{query.casefold()}%")
+        equipment_order = ""
+        if equipment_type:
+            equipment_order = "CASE WHEN lower(equipment.display_name) = ? THEN 0 ELSE 1 END, "
+            params.append(equipment_type.casefold())
+        params.append(limit)
+        sql = f"""SELECT equipment.display_name AS equipment_type,
+            COALESCE(symptom.display_name, '') AS symptom,
+            cause.display_name AS cause,
+            cause_edge.source_work_order_id,
+            cause_edge.source_task_id,
+            cause_edge.source_review_version,
+            cause_edge.evidence_ids_json
+        FROM memory_edges cause_edge
+        JOIN memory_nodes equipment ON equipment.node_id = cause_edge.source_node_id
+        JOIN memory_nodes cause ON cause.node_id = cause_edge.target_node_id
+        JOIN work_order_review_events review ON review.work_order_id = cause_edge.source_work_order_id
+            AND review.task_id = cause_edge.source_task_id
+            AND review.version = cause_edge.source_review_version
+        LEFT JOIN memory_edges symptom_edge ON symptom_edge.source_node_id = equipment.node_id
+            AND symptom_edge.source_task_id = cause_edge.source_task_id
+            AND symptom_edge.source_review_version = cause_edge.source_review_version
+            AND symptom_edge.relation_type = 'has_symptom'
+            AND symptom_edge.active = 1
+        LEFT JOIN memory_nodes symptom ON symptom.node_id = symptom_edge.target_node_id
+        WHERE {' AND '.join(clauses)}
+        ORDER BY {equipment_order}cause_edge.updated_at DESC, cause_edge.edge_id
+        LIMIT ?"""
+        with self._connect() as connection:
+            return connection.execute(sql, params).fetchall()
+
+    @staticmethod
+    def _upsert_memory_graph(
+        connection: sqlite3.Connection, nodes: list[MemoryNode], edges: list[MemoryEdge]
+    ) -> None:
+        """Validate and write a memory graph on an existing transaction."""
         if len({node.node_id for node in nodes}) != len(nodes):
             raise ValueError("Memory node IDs must be unique within a graph update.")
         if len({edge.edge_id for edge in edges}) != len(edges):
@@ -832,9 +933,7 @@ class SQLiteStore:
         if any(node.synthetic_demo for node in nodes):
             raise ValueError("Synthetic demo records cannot be promoted into reusable memory.")
         now = _now().isoformat()
-        with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            for edge in edges:
+        for edge in edges:
                 if edge.synthetic_demo:
                     raise ValueError("Synthetic demo records cannot be promoted into reusable memory.")
                 review = connection.execute(
@@ -844,7 +943,7 @@ class SQLiteStore:
                 ).fetchone()
                 if review is None or review["verdict"] != "accepted":
                     raise ValueError("Reusable memory requires a linked accepted work-order review.")
-            for node in nodes:
+        for node in nodes:
                 existing = connection.execute(
                     "SELECT node_type, canonical_key FROM memory_nodes WHERE node_id = ?", (node.node_id,)
                 ).fetchone()
@@ -859,7 +958,7 @@ class SQLiteStore:
                     ON CONFLICT(node_id) DO UPDATE SET display_name=excluded.display_name""",
                     (node.node_id, node.node_type, node.canonical_key, node.display_name, int(node.synthetic_demo)),
                 )
-            for edge in edges:
+        for edge in edges:
                 connection.execute(
                     """INSERT INTO memory_edges(
                         edge_id, source_node_id, relation_type, target_node_id,
@@ -867,8 +966,8 @@ class SQLiteStore:
                         evidence_ids_json, synthetic_demo, active, created_at, updated_at
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(edge_id) DO UPDATE SET
-                        evidence_ids_json=excluded.evidence_ids_json, active=excluded.active,
-                        updated_at=excluded.updated_at
+                    evidence_ids_json=excluded.evidence_ids_json, active=excluded.active,
+                    updated_at=CASE WHEN memory_edges.active = 0 THEN excluded.updated_at ELSE memory_edges.updated_at END
                     WHERE memory_edges.source_task_id=excluded.source_task_id
                       AND memory_edges.source_work_order_id=excluded.source_work_order_id
                       AND memory_edges.source_review_version=excluded.source_review_version""",
@@ -976,6 +1075,7 @@ class SQLiteStore:
         reviewer: str,
         verdict: str,
         note: str | None,
+        projection_factory: Callable[[int], tuple[list[MemoryNode], list[MemoryEdge]]] | None = None,
     ) -> WorkOrderReview:
         """Append a review version after atomically checking task ownership and state."""
         reviewed_at = _now()
@@ -1003,6 +1103,13 @@ class SQLiteStore:
                 ) VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 (work_order_id, task_id, version, reviewer, verdict, note, reviewed_at.isoformat()),
             )
+            connection.execute(
+                "UPDATE memory_edges SET active = 0, updated_at = ? WHERE source_work_order_id = ? AND source_task_id = ?",
+                (reviewed_at.isoformat(), work_order_id, task_id),
+            )
+            if verdict == "accepted" and projection_factory is not None:
+                nodes, edges = projection_factory(version)
+                self._upsert_memory_graph(connection, nodes, edges)
         return WorkOrderReview(
             work_order_id=work_order_id,
             task_id=task_id,

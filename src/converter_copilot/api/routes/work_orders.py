@@ -5,6 +5,7 @@ from pydantic import ValidationError
 
 from converter_copilot.api.models import WorkOrderReviewRequest
 from converter_copilot.api.runner import TaskRunner, WorkflowUnavailableError
+from converter_copilot.domain.memory import build_review_projection
 from converter_copilot.domain.schemas import FaultAnalysisInput, TaskCreate, TaskMode
 from converter_copilot.domain.work_orders import get_work_order, list_work_orders
 from converter_copilot.storage.sqlite_store import IdempotencyConflictError
@@ -100,12 +101,22 @@ def build_work_order_router(runner: TaskRunner) -> APIRouter:
             raise HTTPException(status_code=404, detail="Work order not found.")
         try:
             request = WorkOrderReviewRequest.model_validate(payload)
+            work_order = get_work_order(work_order_id)
+            report = runner.store.get_report(task_id)
+            task = runner.store.get_task(task_id)
+            source_context = task.inputs.get("source_context", {}) if task else {}
             return runner.store.save_work_order_review(
                 work_order_id,
                 task_id,
                 reviewer=request.reviewer,
                 verdict=request.verdict,
                 note=request.note,
+                projection_factory=(
+                    lambda version: build_review_projection(work_order, task_id, version, report)
+                    if work_order is not None and report is not None
+                    and not (isinstance(source_context, dict) and source_context.get("synthetic_demo"))
+                    else ([], [])
+                ),
             )
         except ValidationError as error:
             raise HTTPException(status_code=422, detail="Review payload failed validation.") from error

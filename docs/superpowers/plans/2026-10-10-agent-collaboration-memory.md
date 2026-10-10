@@ -181,23 +181,23 @@ Expected: PASS; legacy task/report/events API shapes are unchanged.
 - `GET /api/memory?q=&equipment_type=&limit=10` returns `{items: MemoryMatch[], synthetic_demo: false}`; `limit` is bounded to 1–50.
 - Accepted review persistence and memory projection use one SQLite transaction or a transactionally recorded projection state; corrections/rejections invalidate earlier active edges by source review version.
 
-- [ ] **Step 1: Write failing tests** for acceptance eligibility, rejected/incomplete/synthetic/no-evidence exclusion, revoke/correction invalidation, idempotent replay, and query provenance.
-- [ ] **Step 2: Run focused tests and confirm no reviewed memory projection exists.**
+- [x] **Step 1: Write failing tests** for acceptance eligibility, rejected/incomplete/synthetic/no-evidence exclusion, revoke/correction invalidation, idempotent replay, and query provenance.
+- [x] **Step 2: Run focused tests and confirm no reviewed memory projection exists.**
 
 Run: `python -m pytest tests/converter_copilot/test_reviewed_memory.py tests/converter_copilot/test_memory_api.py -q`
 
 Expected: FAIL before the projection service and route are added.
 
-- [ ] **Step 3: Implement controlled node/edge projection** from accepted work-order analysis and source evidence; derive canonical keys from normalized structured values, never free-form unreviewed model text.
-- [ ] **Step 4: Make review save plus projection/invalidation transaction-safe and idempotent** for each `(work_order_id, task_id, version)` source identity.
-- [ ] **Step 5: Add bounded memory query service and read-only API** with source case, review version, evidence IDs, synthetic label, and differences.
-- [ ] **Step 6: Run memory unit, transaction, API, and existing work-order review tests.**
+- [x] **Step 3: Implement controlled node/edge projection** from accepted work-order analysis and source evidence; derive canonical keys from normalized structured values, never free-form unreviewed model text.
+- [x] **Step 4: Make review save plus projection/invalidation transaction-safe and idempotent** for each `(work_order_id, task_id, version)` source identity.
+- [x] **Step 5: Add bounded memory query service and read-only API** with source case, review version, evidence IDs, synthetic label, and differences.
+- [x] **Step 6: Run memory unit, transaction, API, and existing work-order review tests.**
 
 Run: `python -m pytest tests/converter_copilot/test_reviewed_memory.py tests/converter_copilot/test_memory_api.py tests/converter_copilot/test_work_order_review.py -q`
 
 Expected: PASS; no rejected, incomplete, synthetic, or source-less item is returned as reusable memory.
 
-- [ ] **Step 7: Commit** as `feat: add human-reviewed engineering memory`.
+- [x] **Step 7: Commit** as `feat: add human-reviewed engineering memory`.
 
 ### Task 6: Agent timeline and hypothesis tree in the Web task/report views
 
