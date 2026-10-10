@@ -70,12 +70,12 @@
 - Review writes create an append-only `evaluation_review_events` row and update the current label projection in one SQLite transaction.
 - `EvaluationReviewBundle` contains bundle ID, mode, dataset version, generation time, and per-example task ID plus claim/evidence snapshots. `EvidenceLabel` is `{evidence_id, claim_id, label}` where label is `supported`, `unsupported`, or `unverified`. `EvaluationExample` exposes source type/status, inputs, snapshot claims/evidence, current labels, reviewer/time, and label version. `BundleImportResult` exposes bundle ID and imported/skipped example counts.
 
-- [ ] Add tests for review-bundle idempotency, first review, re-review history, unknown example/evidence IDs, blank reviewer, and transaction rollback on invalid label payload.
-- [ ] Run `uv run pytest tests/converter_copilot/test_evaluation_review.py -q`; expected: review API/service contract tests fail before the tables/service exist.
-- [ ] Add versioned tables for imported bundle identity, example metadata, immutable claim/evidence snapshots, current review projection, and append-only review events; preserve source type and dataset version.
-- [ ] Validate evidence IDs against the example's retrieved/source evidence inventory before accepting reviewed labels.
-- [ ] Re-run targeted tests; expected: review history is append-only and invalid reviews persist nothing.
-- [ ] Commit as `feat: persist evaluation review history`.
+- [x] Add tests for review-bundle idempotency, first review, re-review history, unknown example/evidence IDs, blank reviewer, and transaction rollback on invalid label payload.
+- [x] Run `uv run pytest tests/converter_copilot/test_evaluation_review.py -q`; expected: review API/service contract tests fail before the tables/service exist.
+- [x] Add versioned tables for imported bundle identity, example metadata, immutable claim/evidence snapshots, current review projection, and append-only review events; preserve source type and dataset version.
+- [x] Validate evidence IDs against the example's retrieved/source evidence inventory before accepting reviewed labels.
+- [x] Re-run targeted tests; expected: review history is append-only and invalid reviews persist nothing.
+- [x] Commit as `feat: persist evaluation review history`.
 
 ### Task 3: Add local evaluation review API and page
 

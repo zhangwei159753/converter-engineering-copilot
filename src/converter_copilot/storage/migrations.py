@@ -4,7 +4,7 @@ import sqlite3
 from collections.abc import Callable
 
 Migration = Callable[[sqlite3.Connection], None]
-CURRENT_SCHEMA_VERSION = 4
+CURRENT_SCHEMA_VERSION = 5
 
 
 def _create_base_schema(connection: sqlite3.Connection) -> None:
@@ -123,11 +123,61 @@ def _add_import_candidate_ready(connection: sqlite3.Connection) -> None:
         connection.execute("ALTER TABLE imports ADD COLUMN case_candidates_ready INTEGER NOT NULL DEFAULT 0")
 
 
+def _add_evaluation_reviews(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """CREATE TABLE evaluation_bundles (
+            bundle_id TEXT PRIMARY KEY,
+            mode TEXT NOT NULL,
+            dataset_version TEXT NOT NULL,
+            generated_at TEXT NOT NULL,
+            imported_count INTEGER NOT NULL,
+            skipped_count INTEGER NOT NULL,
+            imported_at TEXT NOT NULL
+        )"""
+    )
+    connection.execute(
+        """CREATE TABLE evaluation_examples (
+            review_id TEXT PRIMARY KEY,
+            bundle_id TEXT NOT NULL REFERENCES evaluation_bundles(bundle_id) ON DELETE CASCADE,
+            example_id TEXT NOT NULL,
+            mode TEXT NOT NULL,
+            source_type TEXT NOT NULL,
+            inputs_json TEXT NOT NULL,
+            task_id TEXT NOT NULL,
+            claims_json TEXT NOT NULL,
+            evidence_json TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            reviewer_id TEXT,
+            reviewed_at TEXT,
+            label_version INTEGER NOT NULL DEFAULT 0,
+            evidence_labels_json TEXT NOT NULL DEFAULT '[]',
+            expected_retrieval_ids_json TEXT NOT NULL DEFAULT '[]',
+            note TEXT,
+            UNIQUE(bundle_id, example_id)
+        )"""
+    )
+    connection.execute("CREATE INDEX idx_evaluation_examples_mode_status ON evaluation_examples(mode, status, review_id)")
+    connection.execute(
+        """CREATE TABLE evaluation_review_events (
+            event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            review_id TEXT NOT NULL REFERENCES evaluation_examples(review_id) ON DELETE CASCADE,
+            label_version INTEGER NOT NULL,
+            reviewer_id TEXT NOT NULL,
+            reviewed_at TEXT NOT NULL,
+            evidence_labels_json TEXT NOT NULL,
+            expected_retrieval_ids_json TEXT NOT NULL,
+            note TEXT
+        )"""
+    )
+    connection.execute("CREATE INDEX idx_evaluation_review_events_review ON evaluation_review_events(review_id, event_id)")
+
+
 MIGRATIONS: list[tuple[int, Migration]] = [
     (1, _create_base_schema),
     (2, _add_task_lifecycle_columns),
     (3, _add_import_ledger),
     (4, _add_import_candidate_ready),
+    (5, _add_evaluation_reviews),
 ]
 
 

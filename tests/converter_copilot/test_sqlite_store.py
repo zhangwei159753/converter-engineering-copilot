@@ -69,7 +69,10 @@ def test_empty_database_migrates_to_current_version(tmp_path):
         version = connection.execute("PRAGMA user_version").fetchone()[0]
         columns = {row[1] for row in connection.execute("PRAGMA table_info(tasks)")}
 
-    assert version == 4
+    assert version == 5
+    with sqlite3.connect(database) as connection:
+        tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert {"evaluation_bundles", "evaluation_examples", "evaluation_review_events"} <= tables
     assert {"task_id", "mode", "status", "inputs_json", "created_at", "updated_at"} <= columns
     with sqlite3.connect(database) as connection:
         assert connection.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'imports'").fetchone()
