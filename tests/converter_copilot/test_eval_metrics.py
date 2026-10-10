@@ -1,6 +1,8 @@
+from converter_copilot.evaluation.dataset import validate_dataset
 from converter_copilot.evaluation.metrics import (
     build_evaluation_summary,
     compute_citation_coverage,
+    compute_citation_integrity_rate,
     compute_evidence_support_rate,
     compute_retrieval_recall,
     compute_schema_pass_rate,
@@ -24,6 +26,16 @@ def test_citation_coverage_counts_claims_with_at_least_one_reference():
     ]) == 2 / 3
 
 
+def test_citation_integrity_rate_checks_only_cited_claims_structurally():
+    assert compute_citation_integrity_rate([
+        {"evidence_ids": ["ev-1"], "verification_status": "supported"},
+        {"evidence_ids": ["ev-2"], "verification_status": "conflicting"},
+        {"evidence_ids": ["missing"], "verification_status": "unverified"},
+        {"evidence_ids": [], "verification_status": "unverified"},
+    ]) == 2 / 3
+    assert compute_citation_integrity_rate([{"evidence_ids": []}]) is None
+
+
 def test_schema_pass_rate_and_manual_support_rate_are_deterministic():
     assert compute_schema_pass_rate([True, False, True]) == 2 / 3
     assert compute_evidence_support_rate(["supported", "unsupported", "unverified", None]) == 0.5
@@ -42,6 +54,7 @@ def test_summary_preserves_missing_cost_data_as_null():
         example_count=2,
         retrieval_recall=None,
         citation_coverage=0.5,
+        citation_integrity_rate=1.0,
         schema_pass_rate=1.0,
         evidence_support_rate=None,
         latencies_ms=[120.0, 180.0],
@@ -51,4 +64,35 @@ def test_summary_preserves_missing_cost_data_as_null():
     assert summary["latency_ms"]["mean"] == 150.0
     assert summary["cost_usd"] is None
     assert summary["retrieval_recall_at_k"] is None
+    assert summary["citation_integrity_rate"] == 1.0
+    assert summary["metric_status"]["citation_integrity_rate"] == "measured"
     assert summary["failures"] == []
+
+
+def _valid_dataset_row(**updates):
+    record = {
+        "example_id": "fixture-1",
+        "source_type": "synthetic_demo_fixture",
+        "label_status": "unreviewed",
+        "inputs": {"equipment_type": "inverter", "symptom": "overvoltage"},
+        "expected_retrieval_ids": [],
+        "manual_evidence_labels": [],
+    }
+    return {**record, **updates}
+
+
+def test_reviewed_labels_require_reviewer_and_timestamp():
+    issues = validate_dataset([_valid_dataset_row(label_status="reviewed")], mode="fault_analysis")
+
+    assert {issue.field for issue in issues} == {"reviewer_id", "reviewed_at", "label_version"}
+
+
+def test_duplicate_example_id_reports_location_without_source_text():
+    issues = validate_dataset(
+        [_valid_dataset_row(), _valid_dataset_row()],
+        mode="fault_analysis",
+    )
+
+    duplicate = next(issue for issue in issues if issue.field == "example_id")
+    assert duplicate.line_number == 2
+    assert "fixture-1" not in duplicate.message

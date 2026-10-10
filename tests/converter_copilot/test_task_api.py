@@ -1,13 +1,14 @@
 import json
+import sqlite3
 import time
 from contextlib import contextmanager
+
 from fastapi.testclient import TestClient
-from converter_copilot.domain.schemas import RetrievedChunk
 
 from converter_copilot.agent.workflows import WorkflowDeps
 from converter_copilot.api.main import create_app
 from converter_copilot.api.runner import TaskRunner
-from converter_copilot.domain.schemas import TaskCreate
+from converter_copilot.domain.schemas import RetrievedChunk, TaskCreate
 from converter_copilot.storage.sqlite_store import SQLiteStore
 
 
@@ -63,7 +64,11 @@ def test_valid_request_runs_and_report_becomes_available(tmp_path):
         response = client.post("/api/tasks", json=_fault_request())
         assert response.status_code == 202
         task_id = response.json()["task"]["task_id"]
-        assert _wait_for_terminal(client, task_id)["status"] == "partial"
+        terminal = _wait_for_terminal(client, task_id)
+        assert terminal["status"] == "partial"
+        assert terminal["attempt"] == 1
+        assert terminal["max_attempts"] == 3
+        assert "lease_owner" not in terminal
         assert client.get(f"/api/tasks/{task_id}/report").status_code == 200
 
 
@@ -76,7 +81,7 @@ def test_invalid_mode_specific_input_returns_422(tmp_path):
 def test_unknown_task_and_report_not_ready_return_4xx(tmp_path):
     with _client(tmp_path) as (client, store):
         assert client.get("/api/tasks/missing").status_code == 404
-        created = store.create_task(TaskCreate.model_validate(_fault_request()))
+        created, _ = store.create_task(TaskCreate.model_validate(_fault_request()))
         assert client.get(f"/api/tasks/{created.task_id}/report").status_code == 409
 
 
@@ -156,6 +161,38 @@ def test_client_disconnect_does_not_cancel_or_duplicate_background_run(tmp_path)
         assert event_text.count('"stage": "queued"') == 1
 
 
+def test_create_idempotency_key_reuses_task_and_rejects_changed_payload(tmp_path):
+    with _client(tmp_path) as (client, store):
+        headers = {"Idempotency-Key": "create-once"}
+        first = client.post("/api/tasks", json=_fault_request(), headers=headers)
+        second = client.post("/api/tasks", json=_fault_request(), headers=headers)
+
+        assert first.status_code == second.status_code == 202
+        task_id = first.json()["task"]["task_id"]
+        assert second.json()["task"]["task_id"] == task_id
+        assert len([task for task in store.list_tasks() if task.task_id == task_id]) == 1
+
+        changed_request = _fault_request()
+        changed_request["inputs"]["symptom"] = "启动过流"
+        conflict = client.post("/api/tasks", json=changed_request, headers=headers)
+        assert conflict.status_code == 409
+        assert len(store.list_tasks()) == 1
+
+
+def test_retry_idempotency_key_returns_same_retry_task(tmp_path):
+    with _client(tmp_path) as (client, store):
+        task_id = client.post("/api/tasks", json=_fault_request()).json()["task"]["task_id"]
+        assert _wait_for_terminal(client, task_id)["status"] == "partial"
+        headers = {"Idempotency-Key": "retry-once"}
+
+        first = client.post(f"/api/tasks/{task_id}/retry", headers=headers)
+        second = client.post(f"/api/tasks/{task_id}/retry", headers=headers)
+
+        assert first.status_code == second.status_code == 202
+        assert first.json()["task"]["task_id"] == second.json()["task"]["task_id"]
+        assert store.retry_count(task_id) == 1
+
+
 def test_failed_workflow_status_and_events_remain_retrievable(tmp_path):
     class FailingModel:
         def with_structured_output(self, schema):
@@ -181,6 +218,39 @@ def test_failed_workflow_status_and_events_remain_retrievable(tmp_path):
     with _client(tmp_path, deps=deps) as (client, _):
         task_id = client.post("/api/tasks", json=_fault_request()).json()["task"]["task_id"]
         task = _wait_for_terminal(client, task_id)
-        assert task["status"] == "failed"
+        assert task["status"] == "partial"
         events = client.get(f"/api/tasks/{task_id}/events").text
         assert '"status": "failed"' in events
+        assert '"stage": "agent:hypothesis_analyst"' in events
+
+
+def test_migration_failure_keeps_liveness_and_marks_readiness_unavailable(tmp_path, monkeypatch):
+    store = SQLiteStore(tmp_path / "migration-error.db")
+    runner = TaskRunner(store=store, deps_provider=lambda: WorkflowDeps(model=NeverModel(), search=EmptySearch(), vector_index=EmptyIndex()))
+
+    def fail_initialization():
+        raise RuntimeError("private migration detail")
+
+    monkeypatch.setattr(store, "initialize", fail_initialization)
+    with TestClient(create_app(runner=runner)) as client:
+        assert client.get("/api/health").status_code == 200
+        readiness = client.get("/api/ready")
+        assert readiness.status_code == 503
+        assert readiness.json()["components"]["database"] == "unavailable"
+        assert "private migration detail" not in readiness.text
+
+
+def test_readiness_checks_bounded_sqlite_write_availability(tmp_path, monkeypatch):
+    store = SQLiteStore(tmp_path / "write-unavailable.db")
+    runner = TaskRunner(store=store, deps_provider=lambda: WorkflowDeps(model=NeverModel(), search=EmptySearch(), vector_index=EmptyIndex()))
+
+    def fail_write_check(*, timeout_seconds):
+        assert timeout_seconds == 1.0
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(store, "check_writable", fail_write_check)
+    with TestClient(create_app(runner=runner)) as client:
+        readiness = client.get("/api/ready")
+        assert readiness.status_code == 503
+        assert readiness.json()["status"] == "not_ready"
+        assert readiness.json()["components"]["database"] == "unavailable"

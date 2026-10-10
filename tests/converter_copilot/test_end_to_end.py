@@ -6,15 +6,21 @@ from fastapi.testclient import TestClient
 from converter_copilot.agent.workflows import WorkflowDeps
 from converter_copilot.api.main import create_app
 from converter_copilot.api.runner import TaskRunner
-from converter_copilot.domain.schemas import FaultAnalysisReport, FaultHypothesis, RetrievedChunk
+from converter_copilot.domain.agent_audit import BranchAuditResult
+from converter_copilot.domain.schemas import (
+    FaultAnalysisReport,
+    FaultHypothesis,
+    RetrievedChunk,
+)
 from converter_copilot.storage.sqlite_store import SQLiteStore
 
 
 class FakeStructuredModel:
     def with_structured_output(self, _schema):
-        return self
+        return _FakeStructuredAdapter(self, _schema)
 
-    async def ainvoke(self, _messages):
+    @staticmethod
+    def _fault_report():
         return FaultAnalysisReport(hypotheses=[FaultHypothesis(
             hypothesis="检查制动单元回路",
             mechanism="演示用：直流侧能量可能无法正常释放。",
@@ -23,6 +29,17 @@ class FakeStructuredModel:
             supporting_evidence_ids=["e2e-chunk-1"],
             checks=["按设备规程停机隔离后检查制动单元。"],
         )])
+
+
+class _FakeStructuredAdapter:
+    def __init__(self, model, schema):
+        self.model = model
+        self.schema = schema
+
+    async def ainvoke(self, _messages):
+        if self.schema is BranchAuditResult:
+            return BranchAuditResult(supporting_evidence_ids=["e2e-chunk-1"])
+        return FakeStructuredModel._fault_report()
 
 
 class EmptySearch:
@@ -38,6 +55,7 @@ class OneChunkIndex:
             filename="synthetic-demo-manual.md",
             text="Synthetic fixture: inspect the braking circuit for DC bus overvoltage.",
             locator="heading: Demo fixture",
+            metadata={"equipment_type": "演示变流器"},
             score=0.9,
         )]
 
@@ -52,7 +70,7 @@ def test_health_readiness_and_fault_task_complete_with_traceable_evidence(tmp_pa
         assert readiness.status_code == 200
         assert readiness.json() == {
             "status": "ready",
-            "components": {"database": "ready"},
+            "components": {"database": "ready", "worker": "ready"},
         }
 
         response = client.post("/api/tasks", json={
@@ -71,7 +89,7 @@ def test_health_readiness_and_fault_task_complete_with_traceable_evidence(tmp_pa
             if task["status"] in {"completed", "partial", "failed"}:
                 break
             time.sleep(0.02)
-        assert task["status"] == "completed"
+        assert task["status"] == "completed", client.get(f"/api/tasks/{task_id}/report").json()
 
         events_response = client.get(f"/api/tasks/{task_id}/events")
         event_rows = [json.loads(line[6:]) for line in events_response.text.splitlines() if line.startswith("data: ")]

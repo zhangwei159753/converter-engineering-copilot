@@ -72,3 +72,6 @@ tmp/
 temp/
 
 .langgraph_api
+
+# Isolated implementation worktrees
+.worktrees/

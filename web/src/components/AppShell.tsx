@@ -1,4 +1,4 @@
-import { Activity, Archive, AudioWaveform, BookOpen, CircleHelp, Settings2 } from "lucide-react";
+import { Activity, Archive, AudioWaveform, BookOpen, CircleHelp, ClipboardCheck, ClipboardList, Settings2 } from "lucide-react";
 import { NavLink, Outlet } from "react-router-dom";
 
 export default function AppShell() {
@@ -10,6 +10,8 @@ export default function AppShell() {
         <NavLink className={({ isActive }) => `rail-link ${isActive ? "active" : ""}`} to="/" title="工作台" aria-label="工作台"><AudioWaveform size={19} /></NavLink>
         <NavLink className="rail-link muted" to="/" title="知识库" aria-label="知识库"><BookOpen size={19} /></NavLink>
         <NavLink className="rail-link muted" to="/" title="任务归档" aria-label="任务归档"><Archive size={19} /></NavLink>
+        <NavLink className={({ isActive }) => `rail-link ${isActive ? "active" : "muted"}`} to="/evaluations" title="人工评测" aria-label="人工评测"><ClipboardCheck size={19} /></NavLink>
+        <NavLink className={({ isActive }) => `rail-link ${isActive ? "active" : "muted"}`} to="/work-orders" title="工单研判" aria-label="工单研判"><ClipboardList size={19} /></NavLink>
         <div className="rail-spacer" />
         <NavLink className="rail-link muted" to="/" title="帮助" aria-label="帮助"><CircleHelp size={19} /></NavLink>
         <NavLink className="rail-link muted" to="/" title="设置" aria-label="设置"><Settings2 size={19} /></NavLink>

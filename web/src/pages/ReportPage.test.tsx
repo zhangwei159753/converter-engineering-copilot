@@ -4,7 +4,11 @@ import { describe, expect, it, vi } from "vitest";
 import ReportPage from "./ReportPage";
 import * as api from "../api/client";
 
-vi.mock("../api/client", () => ({ getReport: vi.fn() }));
+vi.mock("../api/client", () => ({
+  getAgentRuns: vi.fn().mockResolvedValue({ task_id: "task-1", items: [] }),
+  getHypothesisBranches: vi.fn().mockResolvedValue({ task_id: "task-1", items: [] }),
+  getReport: vi.fn(),
+}));
 
 describe("ReportPage", () => {
   it("shows mode result, citation status, evidence drawer, and markdown export", async () => {
@@ -20,7 +24,9 @@ describe("ReportPage", () => {
     });
     render(<MemoryRouter initialEntries={["/tasks/task-1/report"]}><Routes><Route path="/tasks/:taskId/report" element={<ReportPage />} /></Routes></MemoryRouter>);
     expect((await screen.findAllByText("制动单元异常")).length).toBeGreaterThanOrEqual(2);
-    expect(screen.getByText("缺少证据")).toBeInTheDocument();
+    expect(screen.getByText("引用可追溯")).toBeInTheDocument();
+    expect(screen.getByText("待核验")).toBeInTheDocument();
+    expect(screen.getByText(/来源是否直接支持结论，仍需人工核验/)).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole("button", { name: "ev-1" })[0]);
     expect(await screen.findByText("设备手册")).toBeInTheDocument();
     expect(screen.getByText(/page 4/)).toBeInTheDocument();
@@ -66,5 +72,28 @@ describe("ReportPage", () => {
     expect(screen.getByText(/current 50% vs case 25%/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "case-ev-17" }));
     expect(await screen.findByText("维护记录")).toBeInTheDocument();
+  });
+
+  it("shows a reviewed hypothesis branch and opens its linked report evidence", async () => {
+    vi.mocked(api.getReport).mockResolvedValue({
+      task_id: "task-branch", mode: "fault_analysis", completion_status: "partial",
+      result: { hypotheses: [], checks: [] }, claims: [],
+      evidence: [{ evidence_id: "ev-branch", task_id: "task-branch", title: "设备手册", source_type: "document", excerpt: "检查制动回路。", document_id: "doc-1", locator: "page 4", accessed_at: "2026-10-10T00:00:00Z", related_claim_ids: [], source_status: "available" }],
+      quality_warnings: [],
+    });
+    vi.mocked(api.getHypothesisBranches).mockResolvedValue({
+      task_id: "task-branch",
+      items: [{
+        branch_id: "branch-1", task_id: "task-branch", parent_branch_id: null,
+        hypothesis: "检查制动回路。", mechanism_summary: "再生能量未能耗散。",
+        supporting_evidence_ids: ["ev-branch"], opposing_evidence_ids: [], applicability: "direct",
+        missing_fields: [], checks: [], gate_status: "qualified", disposition: "retained", ordinal: 0,
+      }],
+    });
+    render(<MemoryRouter initialEntries={["/tasks/task-branch/report"]}><Routes><Route path="/tasks/:taskId/report" element={<ReportPage />} /></Routes></MemoryRouter>);
+
+    expect(await screen.findByText("检查制动回路。")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "ev-branch" }));
+    expect(await screen.findByText("设备手册")).toBeInTheDocument();
   });
 });

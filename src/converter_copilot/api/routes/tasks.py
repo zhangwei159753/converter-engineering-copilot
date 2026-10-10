@@ -6,9 +6,18 @@ import json
 from fastapi import APIRouter, Header, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
-from converter_copilot.api.models import TaskAccepted
-from converter_copilot.api.runner import RetryLimitError, TaskRunner, WorkflowUnavailableError
+from converter_copilot.api.models import (
+    AgentRunsResponse,
+    AgentRunView,
+    HypothesisBranchesResponse,
+    TaskAccepted,
+)
+from converter_copilot.api.runner import TaskRunner, WorkflowUnavailableError
 from converter_copilot.domain.schemas import TaskCreate
+from converter_copilot.storage.sqlite_store import (
+    IdempotencyConflictError,
+    RetryLimitError,
+)
 
 
 def build_task_router(runner: TaskRunner) -> APIRouter:
@@ -16,11 +25,18 @@ def build_task_router(runner: TaskRunner) -> APIRouter:
     router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
     @router.post("", response_model=TaskAccepted, status_code=202)
-    async def create_task(request: TaskCreate):
+    async def create_task(
+        request: TaskCreate,
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    ):
         try:
-            task = await runner.create(request)
+            task, _ = await runner.create(request, idempotency_key=idempotency_key)
+        except IdempotencyConflictError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
         except WorkflowUnavailableError as error:
             raise HTTPException(status_code=501, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
         except RuntimeError as error:
             raise HTTPException(status_code=503, detail=str(error)) from error
         return TaskAccepted(task=task)
@@ -36,15 +52,36 @@ def build_task_router(runner: TaskRunner) -> APIRouter:
             raise HTTPException(status_code=404, detail="Task not found.")
         return task
 
+    @router.get("/{task_id}/agents", response_model=AgentRunsResponse)
+    def get_agent_runs(task_id: str):
+        if runner.store.get_task(task_id) is None:
+            raise HTTPException(status_code=404, detail="Task not found.")
+        items = [AgentRunView.from_record(record) for record in runner.store.list_agent_runs(task_id)]
+        return AgentRunsResponse(task_id=task_id, items=items)
+
+    @router.get("/{task_id}/hypotheses", response_model=HypothesisBranchesResponse)
+    def get_hypothesis_branches(task_id: str):
+        if runner.store.get_task(task_id) is None:
+            raise HTTPException(status_code=404, detail="Task not found.")
+        return HypothesisBranchesResponse(
+            task_id=task_id,
+            items=runner.store.list_hypothesis_branches(task_id),
+        )
+
     @router.post("/{task_id}/retry", response_model=TaskAccepted, status_code=202)
-    async def retry_task(task_id: str):
+    async def retry_task(
+        task_id: str,
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    ):
         try:
-            task = await runner.retry(task_id)
+            task, _ = await runner.retry(task_id, idempotency_key=idempotency_key)
+        except IdempotencyConflictError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
         except KeyError as error:
             raise HTTPException(status_code=404, detail="Task not found.") from error
-        except ValueError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
         except RetryLimitError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        except ValueError as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
         except WorkflowUnavailableError as error:
             raise HTTPException(status_code=501, detail=str(error)) from error

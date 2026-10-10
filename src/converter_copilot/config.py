@@ -2,6 +2,7 @@
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -46,6 +47,70 @@ class RuntimeConfig:
         return True
 
 
+@dataclass(frozen=True)
+class WorkerSettings:
+    """Validated settings for the local durable task worker."""
+
+    concurrency: int = 1
+    poll_seconds: float = 0.5
+    lease_seconds: int = 60
+    timeout_seconds: int = 1800
+    max_attempts: int = 3
+
+    def __post_init__(self) -> None:
+        """Reject zero, negative, or non-finite worker limits."""
+        import math
+
+        if self.concurrency <= 0 or self.lease_seconds <= 0 or self.timeout_seconds <= 0 or self.max_attempts <= 0:
+            raise ValueError("Worker concurrency, lease, timeout, and attempt limits must be positive.")
+        if not math.isfinite(self.poll_seconds) or self.poll_seconds <= 0:
+            raise ValueError("Worker poll interval must be a positive finite number.")
+
+    @classmethod
+    def from_env(cls) -> "WorkerSettings":
+        """Read worker limits from environment variables and validate them."""
+        load_dotenv()
+        return cls(
+            concurrency=int(os.getenv("CONVERTER_WORKER_CONCURRENCY", "1")),
+            poll_seconds=float(os.getenv("CONVERTER_WORKER_POLL_SECONDS", "0.5")),
+            lease_seconds=int(os.getenv("CONVERTER_TASK_LEASE_SECONDS", "60")),
+            timeout_seconds=int(os.getenv("CONVERTER_TASK_TIMEOUT_SECONDS", "1800")),
+            max_attempts=int(os.getenv("CONVERTER_TASK_MAX_ATTEMPTS", "3")),
+        )
+
+
+@dataclass(frozen=True)
+class ImportLimits:
+    """Validated local upload ceilings applied before import side effects."""
+
+    max_bytes: int = 20 * 1024 * 1024
+    max_pdf_pages: int = 200
+    max_csv_rows: int = 10_000
+    max_chunks: int = 2_000
+
+    def __post_init__(self) -> None:
+        """Reject limits that would disable bounded import processing."""
+        if min(self.max_bytes, self.max_pdf_pages, self.max_csv_rows, self.max_chunks) <= 0:
+            raise ValueError("Import limits must be positive.")
+
+    @classmethod
+    def from_env(cls) -> "ImportLimits":
+        """Load bounded upload limits from the local environment."""
+        load_dotenv()
+        return cls(
+            max_bytes=int(os.getenv("IMPORT_MAX_BYTES", str(20 * 1024 * 1024))),
+            max_pdf_pages=int(os.getenv("IMPORT_MAX_PDF_PAGES", "200")),
+            max_csv_rows=int(os.getenv("IMPORT_MAX_CSV_ROWS", "10000")),
+            max_chunks=int(os.getenv("IMPORT_MAX_CHUNKS", "2000")),
+        )
+
+
+def import_source_directory(default: str | Path | None = None) -> Path:
+    """Return the local directory used to retain validated original uploads."""
+    load_dotenv()
+    return Path(os.getenv("CONVERTER_SOURCE_DIR", str(default or ".data/sources")))
+
+
 def tracing_run_config(*, task_id: str, mode: str) -> dict:
     """Return non-sensitive task and mode tags for LangChain/LangGraph runs."""
     return {
@@ -53,3 +118,27 @@ def tracing_run_config(*, task_id: str, mode: str) -> dict:
         "tags": ["converter-copilot", f"task:{task_id}", f"mode:{mode}"],
         "metadata": {"task_id": task_id, "mode": mode},
     }
+
+
+@dataclass(frozen=True)
+class AgentBudget:
+    """Hard ceilings for one collaborative fault-analysis task."""
+
+    max_hypotheses: int = 3
+    max_parallel_auditors: int = 3
+    max_audit_passes: int = 1
+    max_model_calls: int = 10
+
+    def __post_init__(self) -> None:
+        """Reject invalid values and any attempt to exceed product hard limits."""
+        limits = {
+            "max_hypotheses": (self.max_hypotheses, 3),
+            "max_parallel_auditors": (self.max_parallel_auditors, 3),
+            "max_audit_passes": (self.max_audit_passes, 1),
+            "max_model_calls": (self.max_model_calls, 10),
+        }
+        for name, (value, ceiling) in limits.items():
+            if value < 1:
+                raise ValueError(f"{name} must be positive.")
+            if value > ceiling:
+                raise ValueError(f"{name} exceeds the hard maximum of {ceiling}.")

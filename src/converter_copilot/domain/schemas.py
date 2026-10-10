@@ -21,8 +21,21 @@ class FaultAnalysisInput(BaseModel):
     equipment_type: str = Field(min_length=1)
     symptom: str = Field(min_length=1)
     operating_conditions: dict[str, object] = Field(default_factory=dict)
+    source_context: dict[str, object] = Field(default_factory=dict)
     fault_code: str | None = None
     attachment_ids: list[str] = Field(default_factory=list)
+
+
+class WorkOrderReview(BaseModel):
+    """Append-only local human review of an analysis linked to a work order."""
+
+    work_order_id: str
+    task_id: str
+    version: int
+    reviewer: str
+    verdict: Literal["accepted", "needs_more_information", "rejected"]
+    note: str | None = None
+    reviewed_at: datetime
 
 
 class TechnicalResearchInput(BaseModel):
@@ -58,6 +71,8 @@ class Evidence(BaseModel):
     accessed_at: datetime
     related_claim_ids: list[str] = Field(default_factory=list)
     source_status: Literal["available", "conflicting", "unavailable"]
+    equipment_type: str | None = None
+    applicability: Literal["direct", "related", "cross_equipment", "unknown"] = "unknown"
 
 
 class DocumentChunk(BaseModel):
@@ -88,15 +103,24 @@ class Claim(BaseModel):
 
 
 class FaultHypothesis(BaseModel):
-    """Candidate cause and checks for a reported fault symptom."""
+    """Candidate cause directly supported by cited source material, with checks."""
 
-    hypothesis: str
-    mechanism: str
+    hypothesis: str = Field(description="A candidate cause that is directly supported by at least one cited source excerpt.")
+    mechanism: str = Field(description="The causal mechanism described by the cited source; do not fill gaps with unsupported assumptions.")
     confidence: Literal["low", "medium", "high"]
-    confidence_basis: str
-    supporting_evidence_ids: list[str] = Field(default_factory=list)
-    opposing_evidence_ids: list[str] = Field(default_factory=list)
-    checks: list[str] = Field(default_factory=list)
+    confidence_basis: str = Field(description="Explain how directly and consistently the cited evidence supports this hypothesis.")
+    supporting_evidence_ids: list[str] = Field(
+        default_factory=list,
+        description="Exact IDs of excerpts that directly support the hypothesis. If there is no direct support, omit the hypothesis.",
+    )
+    opposing_evidence_ids: list[str] = Field(
+        default_factory=list,
+        description="Exact IDs of excerpts that conflict with or weaken the hypothesis.",
+    )
+    checks: list[str] = Field(
+        default_factory=list,
+        description="Safe information-gathering checks; these are recommendations, not evidence-backed conclusions.",
+    )
 
 
 class FaultAnalysisReport(BaseModel):
@@ -158,6 +182,51 @@ class CaseRecord(BaseModel):
     validation_result: str | None = None
     handling_result: str | None = None
     evidence_ids: list[str] = Field(default_factory=list)
+    source_type: str | None = None
+
+
+class ImportStatus(str, Enum):
+    """Durable lifecycle state for one validated source import."""
+
+    VALIDATED = "validated"
+    INDEXING = "indexing"
+    COMPLETE = "complete"
+    FAILED = "failed"
+    NEEDS_REPAIR = "needs_repair"
+    DELETING = "deleting"
+    DELETED = "deleted"
+
+
+class ImportRecord(BaseModel):
+    """Private import ledger record; source_path must not be returned by APIs."""
+
+    import_id: str
+    document_id: str
+    content_sha256: str
+    source_name: str
+    file_type: str
+    source_path: str
+    parser_version: str
+    chunker_version: str
+    expected_chunk_count: int
+    indexed_chunks: int = 0
+    imported_cases: int = 0
+    status: ImportStatus
+    created_at: datetime
+    updated_at: datetime
+    error_code: str | None = None
+    case_candidates_ready: bool = False
+
+
+class ImportRepairResult(BaseModel):
+    """Safe result of replaying or inspecting one durable source import."""
+
+    import_id: str
+    status: ImportStatus
+    expected_chunk_count: int
+    indexed_chunks: int
+    imported_cases: int
+    error_code: str | None = None
 
 
 _INPUT_MODELS = {
@@ -183,6 +252,7 @@ class TaskCreate(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def validate_mode_inputs(cls, value):
+        """Coerce request inputs through the schema selected by task mode."""
         if not isinstance(value, dict) or "mode" not in value or "inputs" not in value:
             return value
         mode = TaskMode(value["mode"])
@@ -200,6 +270,10 @@ class TaskRecord(BaseModel):
     inputs: dict[str, object]
     created_at: datetime
     updated_at: datetime
+    attempt: int = 0
+    max_attempts: int = 3
+    lease_expires_at: datetime | None = None
+    error_code: str | None = None
 
 
 class TaskEvent(BaseModel):
@@ -230,12 +304,14 @@ class ConverterReport(BaseModel):
     result: FaultAnalysisReport | TechnicalResearchReport | CaseRetrievalReport
     claims: list[Claim] = Field(default_factory=list)
     evidence: list[Evidence] = Field(default_factory=list)
+    clarification_questions: list[str] = Field(default_factory=list)
     quality_warnings: list[str] = Field(default_factory=list)
     completion_status: Literal["completed", "partial", "failed"]
 
     @model_validator(mode="before")
     @classmethod
     def validate_mode_result(cls, value):
+        """Coerce report results through the schema selected by task mode."""
         if not isinstance(value, dict) or "mode" not in value or "result" not in value:
             return value
         mode = TaskMode(value["mode"])

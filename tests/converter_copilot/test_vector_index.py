@@ -54,3 +54,17 @@ def test_persistent_index_survives_recreation(tmp_path):
     result = second.search("直流母线过压", limit=1)
     assert result[0].chunk_id == "c1"
     assert result[0].document_id == "d1"
+
+
+def test_contains_and_exact_chunk_delete(tmp_path):
+    index = VectorIndex(tmp_path / "chroma", embedding_function=FakeEmbeddings())
+    index.add([
+        _chunk("c1", "d1", "manual.pdf", "直流母线过压。", "page 1"),
+        _chunk("c2", "d2", "other.pdf", "检查电容。", "page 2"),
+    ])
+
+    assert index.contains_chunks(["c1", "c2"])
+    index.delete_chunks(["c1"])
+
+    assert not index.contains_chunks(["c1"])
+    assert index.contains_chunks(["c2"])

@@ -1,18 +1,20 @@
 """Case and source-document import endpoints."""
 
-import csv
-import io
-import tempfile
+import hashlib
 from pathlib import Path
-from uuid import uuid4
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
-from converter_copilot.api.models import CaseImportResult
+from converter_copilot.api.models import CaseImportResult, ImportSummary
 from converter_copilot.api.runner import TaskRunner
-from converter_copilot.domain.schemas import CaseRecord
+from converter_copilot.config import ImportLimits, import_source_directory
+from converter_copilot.domain.schemas import CaseRecord, ImportStatus
 from converter_copilot.retrieval.case_extractor import extract_case_records
-from converter_copilot.retrieval.document_loader import DocumentLoadError, load_document
+from converter_copilot.retrieval.import_validation import (
+    ImportValidationError,
+    retain_source,
+    validate_upload,
+)
 
 
 def build_case_router(runner: TaskRunner) -> APIRouter:
@@ -21,61 +23,189 @@ def build_case_router(runner: TaskRunner) -> APIRouter:
 
     @router.post("/import", response_model=CaseImportResult, status_code=201)
     async def import_cases(file: UploadFile = File(...)):
-        filename = Path(file.filename or "").name
-        if Path(filename).suffix.lower() not in {".pdf", ".md", ".csv"}:
-            raise HTTPException(status_code=415, detail="Supported formats are PDF, Markdown, and CSV.")
-        payload = await file.read()
+        filename = Path((file.filename or "upload").replace("\\", "/")).name
+        limits = ImportLimits.from_env()
+        body: list[bytes] = []
+        total_bytes = 0
+        while True:
+            read_size = min(64 * 1024, limits.max_bytes + 1 - total_bytes)
+            if read_size <= 0:
+                read_size = 1
+            chunk = await file.read(read_size)
+            if not chunk:
+                break
+            body.append(chunk)
+            total_bytes += len(chunk)
+            if total_bytes > limits.max_bytes:
+                error = ImportValidationError(
+                    "file_too_large",
+                    f"File exceeds the {limits.max_bytes}-byte upload limit.",
+                    filename,
+                    status_code=413,
+                )
+                raise HTTPException(status_code=error.status_code, detail=error.detail) from error
+        payload = b"".join(body)
         try:
-            with tempfile.TemporaryDirectory(prefix="converter-import-") as directory:
-                path = Path(directory) / filename
-                path.write_bytes(payload)
-                chunks = load_document(path, task_id="case-import")
-            deps = runner.deps_provider()
-            deps.vector_index.add(chunks)
-        except DocumentLoadError as error:
-            raise HTTPException(status_code=400, detail=str(error)) from error
-        except RuntimeError as error:
-            raise HTTPException(status_code=503, detail=str(error)) from error
+            validated = validate_upload(filename, payload, limits)
+        except ImportValidationError as error:
+            raise HTTPException(status_code=error.status_code, detail=error.detail) from error
 
-        imported_cases = 0
+        filename = validated.filename
+        chunks = validated.chunks
+        source_path = retain_source(validated, import_source_directory(runner.store.database_path.parent / "sources"))
+        import_record, reused = runner.store.create_import(
+            validated.import_id,
+            content_sha256=validated.content_sha256,
+            source_name=validated.filename,
+            file_type=validated.file_type,
+            parser_version=validated.parser_version,
+            chunker_version=validated.chunker_version,
+            expected_chunk_count=len(chunks),
+            source_path=str(source_path),
+        )
+        if reused:
+            if import_record.status.value == "complete":
+                return CaseImportResult(
+                    document_ids=[import_record.document_id],
+                    chunk_count=import_record.indexed_chunks,
+                    imported_case_count=import_record.imported_cases,
+                    import_id=validated.import_id,
+                    reused=True,
+                )
+            await runner.reconcile_imports(validated.import_id)
+            import_record = runner.store.get_import(validated.import_id)
+            if import_record is not None and import_record.status == ImportStatus.COMPLETE:
+                return CaseImportResult(
+                    document_ids=[import_record.document_id],
+                    chunk_count=import_record.indexed_chunks,
+                    imported_case_count=import_record.imported_cases,
+                    import_id=validated.import_id,
+                    reused=True,
+                )
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "import_incomplete",
+                    "message": "This file already has an incomplete import. Use the repair action before retrying.",
+                    "filename": filename,
+                    "row": None,
+                },
+            )
+
+        candidate_cases: list[CaseRecord] = []
         if Path(filename).suffix.lower() in {".pdf", ".md"}:
             try:
                 deps = runner.deps_provider()
                 for chunk in chunks[:8]:
                     extracted = await extract_case_records(chunk.text, evidence_id=chunk.chunk_id, model=deps.model)
-                    for case in extracted:
-                        runner.store.save_case(case)
-                        imported_cases += 1
+                    for index, case in enumerate(extracted, start=1):
+                        stable_id = hashlib.sha256(
+                            f"{validated.import_id}:{chunk.chunk_id}:{index}".encode()
+                        ).hexdigest()[:24]
+                        candidate_cases.append(case.model_copy(update={"case_id": f"case-{stable_id}"}))
             except RuntimeError as error:
-                raise HTTPException(status_code=503, detail=str(error)) from error
-        if Path(filename).suffix.lower() == ".csv":
-            try:
-                rows = csv.DictReader(io.StringIO(payload.decode("utf-8-sig"), newline=""), strict=True)
-                for row_number, row in enumerate(rows, start=2):
-                    symptom = (row.get("symptom") or "").strip()
-                    if not symptom:
-                        continue
-                    case = CaseRecord(
-                        case_id=f"case-{uuid4().hex[:12]}",
-                        equipment_type=(row.get("equipment_type") or "").strip() or None,
-                        symptom=symptom,
-                        cause=(row.get("cause") or "").strip() or None,
-                        validation_result=(row.get("validation_result") or "").strip() or None,
-                        handling_result=(row.get("handling_result") or "").strip() or None,
-                        evidence_ids=[chunk.chunk_id for chunk in chunks if chunk.locator == f"row {row_number}"],
-                    )
-                    runner.store.save_case(case)
-                    imported_cases += 1
-            except (UnicodeDecodeError, csv.Error) as error:
-                raise HTTPException(status_code=400, detail=f"Could not parse CSV: {error}") from error
+                runner.store.update_import_status(
+                    validated.import_id, ImportStatus.FAILED, indexed_chunks=0, imported_cases=0,
+                    error_code="case_extraction_failed",
+                )
+                raise HTTPException(status_code=503, detail="Case extraction service is unavailable.") from error
+        elif Path(filename).suffix.lower() == ".csv":
+            for row_number, row in enumerate(validated.case_rows, start=2):
+                stable_id = hashlib.sha256(f"{validated.import_id}:{row_number}".encode()).hexdigest()[:24]
+                candidate_cases.append(CaseRecord(
+                    case_id=f"case-{stable_id}",
+                    equipment_type=row.get("equipment_type") or None,
+                    symptom=row["symptom"],
+                    cause=row.get("cause") or None,
+                    validation_result=row.get("validation_result") or None,
+                    handling_result=row.get("handling_result") or None,
+                    evidence_ids=[chunk.chunk_id for chunk in chunks if chunk.locator == f"row {row_number}"],
+                    source_type=row.get("record_type") or row.get("source_type"),
+                ))
+
+        runner.store.save_import_chunks(validated.import_id, chunks)
+        runner.store.save_import_case_candidates(validated.import_id, candidate_cases)
+        runner.store.update_import_status(
+            validated.import_id, ImportStatus.INDEXING, indexed_chunks=0, imported_cases=0
+        )
+        try:
+            deps = runner.deps_provider()
+            deps.vector_index.add(chunks)
+        except RuntimeError as error:
+            raise HTTPException(status_code=503, detail="Vector index service is unavailable.") from error
+        imported_cases = runner.store.promote_import_case_candidates(validated.import_id)
+        runner.store.update_import_status(
+            validated.import_id,
+            ImportStatus.COMPLETE,
+            indexed_chunks=len(chunks),
+            imported_cases=imported_cases,
+        )
         return CaseImportResult(
             document_ids=sorted({chunk.document_id for chunk in chunks}),
             chunk_count=len(chunks),
             imported_case_count=imported_cases,
+            import_id=validated.import_id,
+            reused=False,
         )
 
     @router.get("")
     def list_cases():
         return runner.store.list_cases()
+
+    return router
+
+
+def build_import_router(runner: TaskRunner) -> APIRouter:
+    """Build safe import-ledger inspection, repair, and deletion endpoints."""
+    router = APIRouter(prefix="/api/imports", tags=["imports"])
+
+    def to_summary(record):
+        return ImportSummary(
+            import_id=record.import_id,
+            document_id=record.document_id,
+            source_name=record.source_name,
+            file_type=record.file_type,
+            parser_version=record.parser_version,
+            chunker_version=record.chunker_version,
+            expected_chunk_count=record.expected_chunk_count,
+            indexed_chunks=record.indexed_chunks,
+            imported_cases=record.imported_cases,
+            status=record.status,
+            created_at=record.created_at.isoformat(),
+            updated_at=record.updated_at.isoformat(),
+            error_code=record.error_code,
+            synthetic_demo=runner.store.import_is_synthetic(record.import_id),
+        )
+
+    @router.get("", response_model=list[ImportSummary])
+    async def list_imports():
+        await runner.inspect_imports()
+        return [to_summary(record) for record in runner.store.list_import_records()]
+
+    @router.get("/{import_id}", response_model=ImportSummary)
+    def get_import(import_id: str):
+        record = runner.store.get_import(import_id)
+        if record is None or record.status == ImportStatus.DELETED:
+            raise HTTPException(status_code=404, detail="Import not found.")
+        return to_summary(record)
+
+    @router.post("/{import_id}/repair", response_model=ImportSummary)
+    async def repair_import(import_id: str):
+        results = await runner.reconcile_imports(import_id)
+        if not results:
+            raise HTTPException(status_code=404, detail="Import not found.")
+        record = runner.store.get_import(import_id)
+        assert record is not None
+        return to_summary(record)
+
+    @router.delete("/{import_id}", response_model=ImportSummary)
+    async def delete_import(import_id: str):
+        try:
+            await runner.delete_import(import_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="Import not found.") from error
+        record = runner.store.get_import(import_id)
+        assert record is not None
+        return to_summary(record)
 
     return router

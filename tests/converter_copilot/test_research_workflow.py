@@ -4,7 +4,6 @@ from converter_copilot.agent.workflows import WorkflowDeps, build_workflow
 from converter_copilot.domain.schemas import (
     Evidence,
     ResearchComparison,
-    RetrievedChunk,
     TaskMode,
     TechnicalResearchReport,
 )

@@ -7,6 +7,7 @@ from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 
+from converter_copilot.domain.schemas import DocumentChunk, RetrievedChunk
 
 DEFAULT_EMBEDDING_MODEL = "BAAI/bge-small-zh-v1.5"
 DEFAULT_EMBEDDING_CACHE = ".data/fastembed"
@@ -17,6 +18,7 @@ class LocalFastEmbedEmbeddings(Embeddings):
     """Generate local Chinese embeddings with FastEmbed's ONNX runtime."""
 
     def __init__(self, model_name: str | None = None, cache_dir: str | Path | None = None, model=None):
+        """Create a local embedding adapter or wrap an injected test model."""
         if model is None:
             from fastembed import TextEmbedding
 
@@ -27,9 +29,11 @@ class LocalFastEmbedEmbeddings(Embeddings):
         self._model = model
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        """Embed each source text and convert outputs to plain float lists."""
         return [self._to_vector(vector) for vector in self._model.embed(texts)]
 
     def embed_query(self, text: str) -> list[float]:
+        """Embed one query using the same model as indexed documents."""
         return self.embed_documents([text])[0]
 
     @staticmethod
@@ -37,9 +41,6 @@ class LocalFastEmbedEmbeddings(Embeddings):
         if hasattr(vector, "tolist"):
             vector = vector.tolist()
         return [float(value) for value in vector]
-
-from converter_copilot.domain.schemas import DocumentChunk, RetrievedChunk
-
 
 class VectorIndex:
     """Chroma-backed index with injectable embeddings for offline tests."""
@@ -50,6 +51,7 @@ class VectorIndex:
         embedding_function: Embeddings | None = None,
         collection_name: str | None = None,
     ):
+        """Open a persistent Chroma collection with injected or local embeddings."""
         self.persist_directory = str(persist_directory)
         if embedding_function is None:
             embedding_function = LocalFastEmbedEmbeddings(
@@ -112,3 +114,15 @@ class VectorIndex:
     def delete_document(self, document_id: str) -> None:
         """Delete every indexed chunk belonging to a source document."""
         self._store.delete(where={"document_id": document_id})
+
+    def delete_chunks(self, chunk_ids: list[str]) -> None:
+        """Delete only the selected imported chunk IDs from the collection."""
+        if chunk_ids:
+            self._store.delete(ids=chunk_ids)
+
+    def contains_chunks(self, chunk_ids: list[str]) -> bool:
+        """Return whether all requested chunk IDs currently exist in Chroma."""
+        if not chunk_ids:
+            return True
+        result = self._store.get(ids=chunk_ids)
+        return set(result.get("ids", [])) == set(chunk_ids)

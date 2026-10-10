@@ -1,0 +1,60 @@
+/* Agent collaboration: a compact engineering trace with evidence-linked branches. */
+.task-agent-section, .report-collaboration { margin-top: 18px; }
+.report-collaboration { display: grid; grid-template-columns: minmax(290px, .78fr) minmax(0, 1.5fr); gap: 14px; align-items: start; }
+.agent-panel, .hypothesis-panel { min-width: 0; border: 1px solid #dce3dd; background: #fbfcf8; box-shadow: 0 9px 28px #17313908; }
+.agent-panel-head { min-height: 48px; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 0 14px; border-bottom: 1px solid #e5eae5; }
+.agent-panel-head > div { display: flex; align-items: center; gap: 9px; }
+.agent-panel-head .panel-index { color: var(--orange); font: 8px var(--mono); letter-spacing: .08em; border: 1px solid #edcbbb; padding: 4px 5px; }
+.agent-panel-head h2 { color: #344c51; font-size: 10px; font-weight: 700; margin: 0; }
+.trace-count { color: #8e9b98; font: 7px var(--mono); letter-spacing: .09em; }
+.agent-empty, .hypothesis-empty { min-height: 94px; display: flex; align-items: center; justify-content: center; gap: 8px; color: #97a29d; font-size: 9px; }
+.agent-timeline { list-style: none; margin: 0; padding: 8px 13px 12px; }
+.agent-run { display: grid; grid-template-columns: 23px minmax(0, 1fr); gap: 9px; position: relative; min-height: 72px; }
+.agent-run:not(:last-child)::before { content: ''; position: absolute; left: 10px; top: 24px; bottom: -2px; width: 1px; background: #dfe6df; }
+.agent-run-marker { z-index: 1; width: 21px; height: 21px; display: grid; place-items: center; border: 1px solid #d9e1da; border-radius: 50%; color: #738b7b; background: #f7faf5; }
+.agent-run-marker.running { color: #a97043; border-color: #e8d1bf; background: #fbf2e9; }
+.agent-run-marker.failed, .agent-run-marker.incomplete { color: #b75f42; border-color: #efd0c3; background: #fbefea; }
+.agent-run-marker.skipped, .agent-run-marker.queued { color: #879593; border-color: #e0e5e1; background: #f5f7f3; }
+.agent-run-body { min-width: 0; padding: 1px 0 12px; }
+.agent-run-heading { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
+.agent-run-heading > div { display: flex; flex-wrap: wrap; gap: 7px; align-items: baseline; }
+.agent-run-heading strong { color: #4b6164; font-size: 9px; }
+.agent-run-heading code, .agent-run-refs code { color: #94a19c; font: 7px var(--mono); }
+.agent-status { flex: 0 0 auto; color: #678573; font-size: 7px; }
+.agent-status.running { color: #a87042; }.agent-status.failed, .agent-status.incomplete { color: #b76042; }.agent-status.skipped, .agent-status.queued { color: #8e9a96; }
+.agent-run-body > p { color: #758582; font-size: 8px; line-height: 1.6; margin: 5px 0 4px; }
+.agent-run-body time { color: #a1aba6; font: 7px var(--mono); }
+.agent-run-refs { display: flex; flex-wrap: wrap; gap: 5px; margin: 5px 0; }
+.agent-run-refs code { max-width: 100%; overflow-wrap: anywhere; padding: 3px 5px; background: #f0f4ef; }
+.agent-run-refs small { color: #96a29d; font: 7px var(--mono); align-self: center; }
+.agent-spin { animation: spin .9s linear infinite; }
+.hypothesis-caution { color: #8e806d; background: #faf5ea; border-bottom: 1px solid #eee5d5; margin: 0; padding: 9px 14px; font-size: 8px; line-height: 1.5; }
+.hypothesis-tree { list-style: none; margin: 0; padding: 13px 14px 15px; }
+.hypothesis-branch { display: grid; grid-template-columns: 25px minmax(0, 1fr); gap: 8px; position: relative; }
+.branch-rail { display: flex; flex-direction: column; align-items: center; color: #be7450; font: 8px var(--mono); padding-top: 3px; }
+.branch-rail i { flex: 1; width: 1px; min-height: 15px; background: #e0e5df; margin: 7px 0; }
+.branch-card { min-width: 0; border: 1px solid #e2e7e1; background: white; margin-bottom: 11px; padding: 11px 12px; }
+.hypothesis-branch.omitted .branch-card { background: #f8f8f4; }
+.branch-card-head { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+.branch-card-head > code { color: #8f9d98; font: 7px var(--mono); }
+.branch-gate { display: inline-flex; align-items: center; gap: 5px; color: #9b7949; font-size: 8px; }
+.branch-gate.qualified { color: #5e806c; }.branch-gate.blocked, .branch-gate.review_incomplete { color: #b66346; }
+.branch-card h3 { color: #344b50; font-size: 11px; line-height: 1.55; margin: 9px 0 5px; }
+.branch-mechanism { color: #778783; font-size: 8px; line-height: 1.6; margin: 0 0 9px; }
+.branch-links { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.hypothesis-evidence { min-width: 0; border-top: 1px solid #e8ece7; padding: 8px 0 2px; }
+.hypothesis-evidence-title { display: block; color: #81908c; font-size: 7px; margin-bottom: 5px; }
+.hypothesis-evidence.support .hypothesis-evidence-title { color: #63856f; }.hypothesis-evidence.oppose .hypothesis-evidence-title { color: #b46b50; }
+.evidence-ref-list { display: flex; flex-wrap: wrap; gap: 4px; }
+.evidence-ref-list button { border: 1px solid #d9e4dc; background: #f1f7f1; color: #52735d; cursor: pointer; padding: 3px 5px; font: 7px var(--mono); }
+.evidence-ref-list button:hover { border-color: #8eae96; background: #eaf3e9; }
+.evidence-ref-missing { color: #b16b50; font: 7px var(--mono); background: #fbf1ec; border: 1px solid #efdbd1; padding: 3px 5px; overflow-wrap: anywhere; }
+.evidence-none { color: #a2ada7; font-size: 7px; }
+.branch-followup { border-top: 1px solid #e8ece7; margin-top: 8px; padding-top: 7px; }
+.branch-followup summary { display: flex; align-items: center; gap: 5px; cursor: pointer; color: #8a795f; font-size: 7px; list-style: none; }
+.branch-followup summary::-webkit-details-marker { display: none; }.branch-followup[open] summary { margin-bottom: 7px; }
+.branch-followup > div { display: grid; gap: 5px; }.branch-followup p { display: grid; grid-template-columns: 58px 1fr; gap: 6px; color: #788781; font-size: 7px; line-height: 1.5; margin: 0; }
+.branch-followup p strong { color: #9a8767; font-weight: 600; }
+@media (max-width: 900px) { .report-collaboration { grid-template-columns: 1fr; } }
+@media (max-width: 520px) { .agent-panel-head { padding: 0 10px; }.agent-timeline, .hypothesis-tree { padding-left: 10px; padding-right: 10px; }.branch-card { padding: 9px; }.branch-links { grid-template-columns: 1fr; gap: 2px; }.agent-run-heading { flex-wrap: wrap; }.hypothesis-caution { padding-left: 10px; padding-right: 10px; } }
+@media (prefers-reduced-motion: reduce) { .agent-spin { animation: none; } }
