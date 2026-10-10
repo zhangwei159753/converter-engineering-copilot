@@ -48,6 +48,11 @@ class TaskRunner:
             self.settings = WorkerSettings.from_env()
         return self.settings
 
+    @property
+    def is_running(self) -> bool:
+        """Whether the worker polling task is still alive."""
+        return self._worker_task is not None and not self._worker_task.done()
+
     @staticmethod
     def _default_deps() -> WorkflowDeps:
         from converter_copilot.agent.entrypoint import build_default_deps

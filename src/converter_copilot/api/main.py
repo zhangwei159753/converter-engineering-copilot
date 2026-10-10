@@ -24,13 +24,20 @@ def create_app(runner: TaskRunner | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.startup_error = None
+        app.state.startup_component = None
         app.state.worker_started = False
         try:
             runner.store.initialize()
-            await runner.start()
-            app.state.worker_started = True
         except Exception:
             app.state.startup_error = "initialization_failed"
+            app.state.startup_component = "database"
+        else:
+            try:
+                await runner.start()
+                app.state.worker_started = True
+            except Exception:
+                app.state.startup_error = "initialization_failed"
+                app.state.startup_component = "worker"
         try:
             yield
         finally:
@@ -39,6 +46,7 @@ def create_app(runner: TaskRunner | None = None) -> FastAPI:
 
     app = FastAPI(title="Converter Engineering Copilot", version="0.1.0", lifespan=lifespan)
     app.state.startup_error = None
+    app.state.startup_component = None
     app.state.worker_started = False
     origin = os.getenv("WEB_ORIGIN", "http://localhost:5173")
     app.add_middleware(
@@ -58,9 +66,13 @@ def create_app(runner: TaskRunner | None = None) -> FastAPI:
     @app.get("/api/ready")
     def readiness():
         if app.state.startup_error:
+            database_state = "unavailable" if app.state.startup_component == "database" else "ready"
             return JSONResponse(
                 status_code=503,
-                content={"status": "not_ready", "components": {"database": "unavailable", "worker": "stopped"}},
+                content={
+                    "status": "not_ready",
+                    "components": {"database": database_state, "worker": "stopped"},
+                },
             )
         try:
             runner.store.list_tasks(limit=1)
@@ -69,7 +81,7 @@ def create_app(runner: TaskRunner | None = None) -> FastAPI:
                 status_code=503,
                 content={"status": "not_ready", "components": {"database": "unavailable", "worker": "stopped"}},
             )
-        if not app.state.worker_started:
+        if not app.state.worker_started or not runner.is_running:
             return JSONResponse(
                 status_code=503,
                 content={"status": "not_ready", "components": {"database": "ready", "worker": "stopped"}},
