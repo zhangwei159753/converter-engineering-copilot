@@ -93,10 +93,10 @@ def _audit(support=("ev-1",), oppose=()):
     )
 
 
-def _graph(model, *, budget=None, events=None, branches=None):
+def _graph(model, *, budget=None, events=None, branches=None, search=None):
     deps = WorkflowDeps(
         model=model,
-        search=FakeSearch(),
+        search=search or FakeSearch(),
         vector_index=EmptyVector(),
         agent_event_sink=events.append if events is not None else None,
         agent_result_sink=branches.append if branches is not None else None,
@@ -144,6 +144,20 @@ def test_opposing_evidence_is_preserved_but_branch_is_not_promoted():
     assert branch.opposing_evidence_ids == ["ev-1"]
     assert branch.gate_status == "blocked"
     assert branch.disposition == "needs_more_information"
+    assert not state["report"].result.hypotheses
+    assert state["report"].completion_status == "partial"
+
+
+def test_source_marked_conflicting_cannot_qualify_supporting_branch():
+    class ConflictingSearch(FakeSearch):
+        def search(self, query, *, limit=5):
+            return [item.model_copy(update={"source_status": "conflicting"}) for item in super().search(query, limit=limit)]
+
+    model = SchemaModel(audit_results=[_audit()] * 3)
+    state = asyncio.run(_graph(model, search=ConflictingSearch()).ainvoke(_state()))
+
+    assert state["hypothesis_branches"][0].gate_status == "blocked"
+    assert state["hypothesis_branches"][0].disposition == "needs_more_information"
     assert not state["report"].result.hypotheses
     assert state["report"].completion_status == "partial"
 

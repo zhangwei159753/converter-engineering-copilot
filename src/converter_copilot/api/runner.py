@@ -339,6 +339,7 @@ class TaskRunner:
 
     async def _execute_claimed(self, record: TaskRecord, settings: WorkerSettings) -> None:
         task_id = record.task_id
+        work: asyncio.Task | None = None
         try:
             # Provider objects may be shared by the API/worker; bind per-task sinks
             # on a shallow copy so concurrent tasks never overwrite each other's callbacks.
@@ -377,6 +378,9 @@ class TaskRunner:
             self.store.mark_running_agent_runs_incomplete_for_worker(task_id, worker_id=self._worker_id)
             self.store.fail_task(task_id, worker_id=self._worker_id, error_code="task_timeout")
         except asyncio.CancelledError:
+            if work is not None and not work.done():
+                work.cancel()
+                await asyncio.gather(work, return_exceptions=True)
             self.store.mark_running_agent_runs_incomplete_for_worker(task_id, worker_id=self._worker_id)
             raise
         except Exception:

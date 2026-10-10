@@ -157,6 +157,52 @@ def test_runner_timeout_marks_running_agent_records_incomplete(tmp_path, monkeyp
     assert run.completed_at is not None
 
 
+def test_runner_cancellation_stops_and_awaits_workflow_task(tmp_path, monkeypatch):
+    store = SQLiteStore(tmp_path / "agent-cancel.db")
+    task, _ = store.create_task(_request())
+    shared_deps = SimpleNamespace(case_store=None, agent_event_sink=None, agent_result_sink=None)
+    started_event = asyncio.Event()
+    cancelled_event = asyncio.Event()
+
+    class HangingGraph:
+        def __init__(self, deps):
+            self.deps = deps
+
+        async def ainvoke(self, state):
+            started = AgentRunRecord(
+                agent_run_id="run-cancelled", task_id=state["task_id"], role="coordinator",
+                stage="intake", status="running", summary="检查输入。", started_at=datetime.now(timezone.utc),
+            )
+            self.deps.agent_event_sink(started)
+            started_event.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cancelled_event.set()
+                raise
+
+    monkeypatch.setattr(runner_module, "build_workflow", lambda _mode, deps: HangingGraph(deps))
+    runner = TaskRunner(
+        store, deps_provider=lambda: shared_deps,
+        settings=WorkerSettings(lease_seconds=30, timeout_seconds=10),
+    )
+
+    async def cancel_running_task():
+        run_task = asyncio.create_task(runner.run_once())
+        await started_event.wait()
+        run_task.cancel()
+        try:
+            await run_task
+        except asyncio.CancelledError:
+            pass
+
+    asyncio.run(cancel_running_task())
+
+    assert cancelled_event.is_set()
+    assert store.list_agent_runs(task.task_id)[0].status == "incomplete"
+    assert store.get_task(task.task_id).status == "running"
+
+
 def test_agent_run_and_branch_updates_are_fenced_by_current_lease(tmp_path):
     store = SQLiteStore(tmp_path / "agent-fencing.db")
     task, _ = store.create_task(_request())

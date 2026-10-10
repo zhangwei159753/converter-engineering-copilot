@@ -421,6 +421,15 @@ def make_evidence_gate_node(deps):
                 continue
             support_ids = [item for item in branch.supporting_evidence_ids if item in evidence_by_id]
             support = [evidence_by_id[item] for item in support_ids]
+            if any(item.source_status == "conflicting" for item in support):
+                branches.append(branch.model_copy(update={
+                    "gate_status": "blocked",
+                    "disposition": "needs_more_information",
+                }))
+                warnings.append(
+                    f"候选 {branch.ordinal + 1} 的支持来源本身标记为冲突，已保留证据但未晋升为原因结论。"
+                )
+                continue
             if not support:
                 branches.append(branch.model_copy(update={"gate_status": "blocked", "disposition": "omitted"}))
                 warnings.append(f"候选 {branch.ordinal + 1} 没有可解析的直接支持证据，已从原因结论中移除。")
