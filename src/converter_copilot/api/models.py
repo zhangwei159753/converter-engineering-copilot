@@ -1,9 +1,11 @@
 """Stable API response models."""
 
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from converter_copilot.domain.agent_audit import AgentRunRecord, HypothesisBranch
 from converter_copilot.domain.schemas import ImportStatus, TaskRecord
 
 
@@ -11,6 +13,50 @@ class TaskAccepted(BaseModel):
     """Task creation response returned before background execution finishes."""
 
     task: TaskRecord
+
+
+class AgentRunView(BaseModel):
+    """Public lifecycle projection; excludes provider usage, prompts, and trace payloads."""
+
+    agent_run_id: str
+    task_id: str
+    role: Literal[
+        "coordinator",
+        "evidence_researcher",
+        "hypothesis_analyst",
+        "evidence_auditor",
+        "report_synthesizer",
+    ]
+    stage: str
+    status: Literal["queued", "running", "completed", "failed", "skipped", "incomplete"]
+    parent_run_id: str | None = None
+    branch_id: str | None = None
+    input_refs: list[str]
+    output_refs: list[str]
+    summary: str
+    error_code: str | None = None
+    retry_count: int
+    started_at: datetime
+    completed_at: datetime | None = None
+
+    @classmethod
+    def from_record(cls, record: AgentRunRecord) -> "AgentRunView":
+        """Copy only fields approved for the local read API."""
+        return cls.model_validate(record.model_dump(exclude={"provider_usage"}))
+
+
+class AgentRunsResponse(BaseModel):
+    """Task-scoped ordered agent lifecycle response."""
+
+    task_id: str
+    items: list[AgentRunView]
+
+
+class HypothesisBranchesResponse(BaseModel):
+    """Task-scoped ordered auditable hypothesis-tree response."""
+
+    task_id: str
+    items: list[HypothesisBranch]
 
 
 class CaseImportResult(BaseModel):

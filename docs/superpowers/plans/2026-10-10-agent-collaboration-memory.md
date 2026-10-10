@@ -148,15 +148,15 @@ Expected: PASS; old task events remain readable and new agent events replay afte
 - `GET /api/tasks/{task_id}/hypotheses` returns `{task_id, items: HypothesisBranch[]}` ordered by ordinal, then branch ID.
 - Unknown task IDs return 404; responses omit internal prompt text, credentials, raw exceptions, and provider trace payloads.
 
-- [ ] **Step 1: Write failing API tests** for existing/unknown tasks, ordering, response schema, and forbidden sensitive fields.
-- [ ] **Step 2: Run focused API tests and confirm endpoints are absent.**
+- [x] **Step 1: Write failing API tests** for existing/unknown tasks, ordering, response schema, and forbidden sensitive fields.
+- [x] **Step 2: Run focused API tests and confirm endpoints are absent.**
 
 Run: `python -m pytest tests/converter_copilot/test_agent_audit_api.py -q`
 
 Expected: FAIL because routes are not registered.
 
-- [ ] **Step 3: Add typed response models and task-scoped GET routes** using Task 1 store methods.
-- [ ] **Step 4: Run API tests plus existing task route tests.**
+- [x] **Step 3: Add typed response models and task-scoped GET routes** using Task 1 store methods.
+- [x] **Step 4: Run API tests plus existing task route tests.**
 
 Run: `python -m pytest tests/converter_copilot/test_agent_audit_api.py tests/converter_copilot/test_task_api.py -q`
 

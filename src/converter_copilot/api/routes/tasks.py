@@ -6,7 +6,12 @@ import json
 from fastapi import APIRouter, Header, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
-from converter_copilot.api.models import TaskAccepted
+from converter_copilot.api.models import (
+    AgentRunsResponse,
+    AgentRunView,
+    HypothesisBranchesResponse,
+    TaskAccepted,
+)
 from converter_copilot.api.runner import TaskRunner, WorkflowUnavailableError
 from converter_copilot.domain.schemas import TaskCreate
 from converter_copilot.storage.sqlite_store import (
@@ -46,6 +51,22 @@ def build_task_router(runner: TaskRunner) -> APIRouter:
         if task is None:
             raise HTTPException(status_code=404, detail="Task not found.")
         return task
+
+    @router.get("/{task_id}/agents", response_model=AgentRunsResponse)
+    def get_agent_runs(task_id: str):
+        if runner.store.get_task(task_id) is None:
+            raise HTTPException(status_code=404, detail="Task not found.")
+        items = [AgentRunView.from_record(record) for record in runner.store.list_agent_runs(task_id)]
+        return AgentRunsResponse(task_id=task_id, items=items)
+
+    @router.get("/{task_id}/hypotheses", response_model=HypothesisBranchesResponse)
+    def get_hypothesis_branches(task_id: str):
+        if runner.store.get_task(task_id) is None:
+            raise HTTPException(status_code=404, detail="Task not found.")
+        return HypothesisBranchesResponse(
+            task_id=task_id,
+            items=runner.store.list_hypothesis_branches(task_id),
+        )
 
     @router.post("/{task_id}/retry", response_model=TaskAccepted, status_code=202)
     async def retry_task(
