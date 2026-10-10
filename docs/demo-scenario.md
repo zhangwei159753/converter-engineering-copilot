@@ -26,6 +26,12 @@ For a useful negative-path demonstration, stop the API or remove a required prov
 
 Open a citation identifier to inspect its source excerpt and locator. Use **导出 Markdown** to download the structured report. The frontend task page reconnects to progress events through `Last-Event-ID`, so refreshing does not create a second analysis task.
 
+## 6. Review an evaluation run
+
+Run `uv run python evals/converter_copilot/run_eval.py --mode fault_analysis` with a configured provider key. The command writes a metric summary and a separate review bundle under `.data/evaluation_results/`. In the Web app, open **人工评测**, import the `*-review.json` file, inspect each claim against its captured excerpt and locator, assign evidence labels, select retrieval gold IDs, enter a local reviewer identifier, and save. Revisions appear in the example's history. Empty gold labels remain `null`/`insufficient_labels`; labels should reflect a documented review of the snapshot, not assumptions about field conditions.
+
 ## What to say in a portfolio demo
 
 Describe these rows and any generated output as synthetic and model-assisted. Do not claim measured recall, field validation, or maintenance savings. The evidence check validates traceable citation IDs and conflict flags, not whether an engineering claim is objectively correct. A qualified engineer should confirm any proposed diagnosis against authorized manuals, actual measurements, and operating procedures.
+
+Human review creates an auditable annotation, not proof of field correctness or maintenance benefit. Do not substitute it for equipment manuals, field measurements, or site safety procedures.

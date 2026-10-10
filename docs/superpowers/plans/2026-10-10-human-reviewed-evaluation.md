@@ -113,6 +113,6 @@
 - Modify: `README.md`
 - Modify: `docs/demo-scenario.md`
 
-- [ ] Document how to review evidence, required reviewer metadata, label versioning, sample counts, metric null reasons, and how to create a versioned baseline only after human review.
-- [ ] Verify docs state that a reviewed evidence label is a human annotation and does not establish field correctness or maintenance benefit.
-- [ ] Commit as `docs: explain evaluation review workflow`.
+- [x] Document how to review evidence, required reviewer metadata, label versioning, sample counts, metric null reasons, and how to create a versioned baseline only after human review.
+- [x] Verify docs state that a reviewed evidence label is a human annotation and does not establish field correctness or maintenance benefit.
+- [x] Commit as `docs: explain evaluation review workflow`.

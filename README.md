@@ -10,7 +10,7 @@
 - **技术调研与实验设计**：整理技术路线、实验条件、局限和可复现实验步骤。
 - **检修案例检索**：导入 PDF、Markdown 或 CSV，以本地向量检索和结构化字段对照历史案例。
 - **交互式 Web 工作台**：创建任务、查看 SSE 进度、打开来源摘录、回看任务和导出 Markdown 报告。
-- **评测和追踪**：JSONL 数据集、可重复指标、逐样例失败记录、可选 LangSmith traces。
+- **人工评测工作台**：导入模型运行的证据快照，标注证据支持度和检索金标准，追踪复核版本；未复核标签不参与质量指标。
 
 ## 本机运行
 
@@ -89,12 +89,13 @@ uv run python evals/converter_copilot/run_eval.py
 uv run python evals/converter_copilot/run_eval.py --mode fault_analysis --recall-at-k 5
 ```
 
-评测执行真实工作流，需要 `DEEPSEEK_API_KEY`。结果写到 `.data/evaluation_results/`。仓库中的起始样例尚无检索金标准和人工证据支持标注，因此相关指标会如实为 `null`；请先人工复核标注，不能把合成示例或未标注分数写成质量承诺。评测定义、字段和 tracing 说明见 [评测说明](evals/converter_copilot/README.md)。
+评测执行真实工作流，需要 `DEEPSEEK_API_KEY`。结果摘要与单独的 review bundle 写到 `.data/evaluation_results/`。在 Web 左侧进入“人工评测”，导入 bundle 后检查证据摘录与定位，填写本地复核人并保存标注；后续修改会追加新版本。仓库中的合成起始样例没有检索金标准和人工支持标签，因此相关指标为 `null` 并显示 `insufficient_labels`。人工标注不等于现场验证，不能把合成数据或未标注分数写成质量承诺。评测字段、复核过程和指标限制见 [评测说明](evals/converter_copilot/README.md)。
 
 ## 演示路径与设计说明
 
 - [演示场景](docs/demo-scenario.md)：用合成 CSV 导入案例并走完任务、进度和报告流程。
 - [系统架构](docs/architecture.md)：模块边界、数据路径、失败状态和部署方式。
+- [本地运维指南](docs/operations.md)：数据恢复、导入修复、人工评测和 CI 检查流程。
 
 ## 边界
 
