@@ -47,6 +47,7 @@ dependencies = [
     "fastapi",
     "uvicorn[standard]",
     "langchain-chroma",
+    "python-multipart",
 ]
 
 [project.optional-dependencies]

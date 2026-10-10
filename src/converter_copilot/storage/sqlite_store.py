@@ -64,6 +64,13 @@ class SQLiteStore:
                     case_id TEXT PRIMARY KEY,
                     payload_json TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS task_retries (
+                    retry_task_id TEXT PRIMARY KEY REFERENCES tasks(task_id) ON DELETE CASCADE,
+                    original_task_id TEXT NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_task_retries_original
+                    ON task_retries(original_task_id);
                 """
             )
 
@@ -102,6 +109,35 @@ class SQLiteStore:
                 "SELECT * FROM tasks ORDER BY created_at DESC, task_id LIMIT ?", (limit,)
             ).fetchall()
         return [self._task_from_row(row) for row in rows]
+
+    def update_task_status(self, task_id: str, status: str) -> TaskRecord | None:
+        """Update lifecycle status and its timestamp atomically."""
+        updated_at = _now()
+        with self._connect() as connection:
+            cursor = connection.execute(
+                "UPDATE tasks SET status = ?, updated_at = ? WHERE task_id = ?",
+                (status, updated_at.isoformat(), task_id),
+            )
+            if cursor.rowcount == 0:
+                return None
+        return self.get_task(task_id)
+
+    def record_retry(self, original_task_id: str, retry_task_id: str) -> None:
+        """Record a retry relationship without modifying the previous attempt."""
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT INTO task_retries(retry_task_id, original_task_id, created_at) VALUES (?, ?, ?)",
+                (retry_task_id, original_task_id, _now().isoformat()),
+            )
+
+    def retry_count(self, original_task_id: str) -> int:
+        """Return how many retry attempts have been created for a task."""
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT COUNT(*) AS count FROM task_retries WHERE original_task_id = ?",
+                (original_task_id,),
+            ).fetchone()
+        return int(row["count"])
 
     def append_event(self, task_id: str, *, stage: str, status: str, message: str) -> TaskEvent:
         created_at = _now()
