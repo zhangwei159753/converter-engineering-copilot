@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createTask, deleteImport, getAgentRuns, getHypothesisBranches, importCases, listImports, repairImport, retryTask } from "./client";
+import { createTask, deleteImport, getAgentRuns, getHypothesisBranches, importCases, listImports, repairImport, retryTask, searchMemory } from "./client";
 
 describe("task API idempotency", () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -63,5 +63,16 @@ describe("agent collaboration read APIs", () => {
       "/api/tasks/task%20%2F%201/agents",
       "/api/tasks/task%20%2F%201/hypotheses",
     ]);
+  });
+});
+
+describe("reviewed memory API", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("encodes query fields and bounds results at the caller", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ items: [], synthetic_demo: false }) });
+    vi.stubGlobal("fetch", fetchMock);
+    await searchMemory("过压 & 停机", "CV 300", 5);
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/memory?q=%E8%BF%87%E5%8E%8B+%26+%E5%81%9C%E6%9C%BA&equipment_type=CV+300&limit=5");
   });
 });

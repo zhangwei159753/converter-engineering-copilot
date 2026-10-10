@@ -1,4 +1,4 @@
-import type { AgentRun, CaseImportResult, ConverterReport, EvaluationExample, EvaluationReviewEvent, EvaluationSummary, HypothesisBranch, ImportSummary, TaskAccepted, TaskEvent, TaskRecord, WorkOrder, WorkOrderDetail, WorkOrderReview } from "../types";
+import type { AgentRun, CaseImportResult, ConverterReport, EvaluationExample, EvaluationReviewEvent, EvaluationSummary, HypothesisBranch, ImportSummary, MemoryMatch, TaskAccepted, TaskEvent, TaskRecord, WorkOrder, WorkOrderDetail, WorkOrderReview } from "../types";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -124,6 +124,11 @@ export function saveWorkOrderReview(workOrderId: string, taskId: string, payload
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
+}
+
+export function searchMemory(query: string, equipmentType: string, limit = 10): Promise<{ items: MemoryMatch[]; synthetic_demo: false }> {
+  const params = new URLSearchParams({ q: query, equipment_type: equipmentType, limit: String(limit) });
+  return request(`/api/memory?${params}`);
 }
 
 const pause = (milliseconds: number, signal: AbortSignal) => new Promise<void>((resolve) => {

@@ -157,6 +157,18 @@ export interface WorkOrderDetail {
   synthetic_demo: true;
 }
 
+export interface MemoryMatch {
+  equipment_type: string;
+  symptom: string;
+  cause: string;
+  source_work_order_id: string;
+  source_task_id: string;
+  source_review_version: number;
+  evidence_ids: string[];
+  applicability_differences: string[];
+  synthetic_demo: boolean;
+}
+
 export interface CaseImportResult {
   document_ids: string[];
   chunk_count: number;

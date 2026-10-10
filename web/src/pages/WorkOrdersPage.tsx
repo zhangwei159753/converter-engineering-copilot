@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Activity, AlertTriangle, ArrowUpRight, Check, ChevronRight, ClipboardList, Clock3, FileText, RotateCw, Search, ShieldCheck, TriangleAlert } from "lucide-react";
 import { createWorkOrderAnalysis, getWorkOrder, listWorkOrders, saveWorkOrderReview } from "../api/client";
+import ReviewedMemoryPanel from "../components/ReviewedMemoryPanel";
 import type { WorkOrder, WorkOrderAnalysis, WorkOrderDetail, WorkOrderReview } from "../types";
 
 const STATUS_LABEL: Record<WorkOrder["status"], string> = { open: "待研判", investigating: "处理中", resolved: "已解决" };
@@ -164,6 +165,8 @@ export default function WorkOrdersPage() {
             <div><strong>{selected.missing_fields.length ? `待补充 ${selected.missing_fields.length} 项现场信息` : "工单字段完整"}</strong><small>{selected.missing_fields.length ? selected.missing_fields.join(" · ") : "仍需由工程师核对原始记录。"}</small></div>
           </div>
           <div className="wo-attachments"><FileText size={14} /><span>关联材料</span>{selected.attachment_names.length ? selected.attachment_names.map((name) => <code key={name}>{name}</code>) : <em>未附材料</em>}</div>
+
+          <ReviewedMemoryPanel workOrderId={selected.work_order_id} equipmentType={selected.equipment_model} symptom={selected.symptom} />
 
           <div className="wo-action-row"><div><span className="wo-section-caption">ANALYSIS QUEUE</span><strong>{currentDetail?.analyses.length ?? 0} 条关联分析</strong></div><button className="primary-button" onClick={startAnalysis} disabled={acting || !currentDetail}><Activity size={15} />{acting ? "正在提交…" : "发起辅助研判"}<ArrowUpRight size={14} /></button></div>
 

@@ -242,27 +242,27 @@ Expected: PASS; TypeScript production bundle builds with the legacy task/report 
 - Modify: `web/src/api/client.ts`
 - Modify: `web/src/pages/WorkOrdersPage.tsx`
 - Modify: `web/src/styles.css`
-- Test: `web/src/pages/WorkOrdersMemory.test.tsx`
+- Test: `web/src/components/ReviewedMemoryPanel.test.tsx`
 
 **Interfaces:**
 - `searchMemory(query, equipmentType, limit): Promise<MemoryMatch[]>` calls `GET /api/memory`.
 - Work-order view queries only after a work order is selected and shows source case/review, equipment and condition differences, and linked evidence; similarity is labeled as retrieval relevance, never as cause probability.
 
-- [ ] **Step 1: Write failing UI tests** for matching memory, no-match state, synthetic/unreviewed exclusion, and provenance/evidence navigation.
-- [ ] **Step 2: Run the focused Vitest test to confirm the panel is absent.**
+- [x] **Step 1: Write failing UI tests** for matching memory, no-match state, synthetic/unreviewed exclusion, and provenance/evidence navigation.
+- [x] **Step 2: Run the focused Vitest test to confirm the panel is absent.**
 
 Run: `npm test -- --run src/pages/WorkOrdersMemory.test.tsx`
 
 Expected: FAIL before the memory section is implemented.
 
-- [ ] **Step 3: Implement typed API access and a compact reviewed-memory section** that preserves existing work-order review actions.
-- [ ] **Step 4: Run memory/work-order UI tests and the production build.**
+- [x] **Step 3: Implement typed API access and a compact reviewed-memory section** that preserves existing work-order review actions.
+- [x] **Step 4: Run memory/work-order UI tests and the production build.**
 
 Run: `npm test -- --run src/pages/WorkOrdersMemory.test.tsx src/pages/WorkOrdersPage.test.tsx` and `npm run build`
 
 Expected: PASS; unreviewed data is never shown as reusable memory.
 
-- [ ] **Step 5: Commit** as `feat: show reviewed memory on work orders`.
+- [x] **Step 5: Commit** as `feat: show reviewed memory on work orders`.
 
 ### Task 8: Offline comparison, operations documentation, and full integration
 
