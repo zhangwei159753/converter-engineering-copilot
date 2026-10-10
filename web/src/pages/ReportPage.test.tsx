@@ -26,4 +26,22 @@ describe("ReportPage", () => {
     expect(screen.getByText(/page 4/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /导出 Markdown/ })).toBeInTheDocument();
   });
+
+  it("renders research methods, conditions, limitations, and experiment steps", async () => {
+    vi.mocked(api.getReport).mockResolvedValue({
+      task_id: "research-1", mode: "technical_research", completion_status: "completed",
+      result: {
+        comparisons: [{ item: "NPC 三电平", method_or_value: "输出 THD 较低", experimental_conditions: "400 V 母线，10 kHz", datasets: ["仿真基准集"], evidence_ids: ["paper-1"] }],
+        limitations: ["结果受调制策略影响"], experiment_steps: ["统一开关频率后测量 THD"],
+      },
+      claims: [{ claim_id: "claim-1", text: "NPC 三电平：输出 THD 较低", claim_type: "fact", evidence_ids: ["paper-1"], verification_status: "supported" }],
+      evidence: [{ evidence_id: "paper-1", task_id: "research-1", title: "拓扑对比研究", source_type: "web", excerpt: "仿真比较。", url: "https://example.test/paper", accessed_at: "2026-10-10T00:00:00Z", related_claim_ids: ["claim-1"], source_status: "available" }],
+      quality_warnings: [],
+    });
+    render(<MemoryRouter initialEntries={["/tasks/research-1/report"]}><Routes><Route path="/tasks/:taskId/report" element={<ReportPage />} /></Routes></MemoryRouter>);
+    expect(await screen.findByText("NPC 三电平")).toBeInTheDocument();
+    expect(screen.getByText("400 V 母线，10 kHz")).toBeInTheDocument();
+    expect(screen.getByText("结果受调制策略影响")).toBeInTheDocument();
+    expect(screen.getByText("统一开关频率后测量 THD")).toBeInTheDocument();
+  });
 });

@@ -11,6 +11,8 @@ from converter_copilot.agent.nodes import (
     make_generate_node,
     make_intake_node,
     make_research_node,
+    make_technical_research_generate_node,
+    make_technical_research_intake_node,
 )
 from converter_copilot.agent.state import ConverterState
 from converter_copilot.domain.schemas import TaskMode
@@ -39,20 +41,26 @@ class WorkflowDeps:
 
 def build_workflow(mode: TaskMode, deps: WorkflowDeps):
     """Compile the requested workflow with explicitly injected dependencies."""
-    if mode != TaskMode.FAULT_ANALYSIS:
+    if mode not in {TaskMode.FAULT_ANALYSIS, TaskMode.TECHNICAL_RESEARCH}:
         raise NotImplementedError(f"Workflow mode {mode.value} is not registered yet.")
     graph = StateGraph(ConverterState)
-    graph.add_node("intake", make_intake_node())
     graph.add_node("research", make_research_node(deps))
-    graph.add_node("clarify", make_clarification_node())
-    graph.add_node("generate", make_generate_node(deps))
-    graph.add_edge(START, "intake")
-    graph.add_conditional_edges(
-        "intake",
-        lambda state: "clarify" if not state["inputs"].get("operating_conditions") else "research",
-        {"clarify": "clarify", "research": "research"},
-    )
-    graph.add_edge("clarify", END)
+    if mode == TaskMode.FAULT_ANALYSIS:
+        graph.add_node("intake", make_intake_node())
+        graph.add_node("clarify", make_clarification_node())
+        graph.add_node("generate", make_generate_node(deps))
+        graph.add_edge(START, "intake")
+        graph.add_conditional_edges(
+            "intake",
+            lambda state: "clarify" if not state["inputs"].get("operating_conditions") else "research",
+            {"clarify": "clarify", "research": "research"},
+        )
+        graph.add_edge("clarify", END)
+    else:
+        graph.add_node("intake", make_technical_research_intake_node())
+        graph.add_node("generate", make_technical_research_generate_node(deps))
+        graph.add_edge(START, "intake")
+        graph.add_edge("intake", "research")
     graph.add_edge("research", "generate")
     graph.add_edge("generate", END)
     return graph.compile()

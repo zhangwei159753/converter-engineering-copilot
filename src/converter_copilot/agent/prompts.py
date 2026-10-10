@@ -8,6 +8,12 @@ Distinguish evidence-supported facts from hypotheses and recommendations. Do not
 Return a structured fault analysis with cautious confidence and actionable, safe diagnostic checks.
 Do not recommend touching energized equipment; measurements and inspection must follow site safety procedures."""
 
+TECHNICAL_RESEARCH_SYSTEM = """You are a technical research assistant for power converter engineering.
+Compare methods only when their source, metric, and experimental conditions can be traced.
+Keep contradictory findings visible, separate reported results from interpretation, and state limitations.
+Every comparison must cite evidence IDs from the supplied material. Never invent papers, values, datasets, or URLs.
+Suggest reproducible experiment steps and identify variables that must be controlled."""
+
 
 def format_research_prompt(question: str, source_passages: list[str]) -> str:
     """Format retrieved passages as escaped JSON data, separate from instructions."""

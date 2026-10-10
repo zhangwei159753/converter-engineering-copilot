@@ -48,7 +48,8 @@ export default function TaskPage() {
 
   if (!task) return <div className="loading-panel">{error || "正在读取任务记录……"}</div>;
   const terminal = ["completed", "partial", "failed"].includes(task.status);
-  return <div className="task-page"><Link className="back-link" to="/"><ArrowLeft size={15} />返回工作台</Link><div className="task-heading"><div><span className="section-kicker">TASK / {task.task_id.slice(0, 8).toUpperCase()}</span><h1>故障现象分析<span>.</span></h1><p>{String(task.inputs.equipment_type ?? "变流器")} · {String(task.inputs.symptom ?? "工程任务")}</p></div><span className="task-time">创建于 {new Date(task.created_at).toLocaleString("zh-CN")}</span></div>
+  const isResearch = task.mode === "technical_research";
+  return <div className="task-page"><Link className="back-link" to="/"><ArrowLeft size={15} />返回工作台</Link><div className="task-heading"><div><span className="section-kicker">TASK / {task.task_id.slice(0, 8).toUpperCase()}</span><h1>{isResearch ? "技术调研与实验设计" : "故障现象分析"}<span>.</span></h1><p>{String(isResearch ? task.inputs.question ?? "技术调研" : task.inputs.equipment_type ?? "变流器")} · {String(isResearch ? task.inputs.scope ?? "公开资料与本地文档" : task.inputs.symptom ?? "工程任务")}</p></div><span className="task-time">创建于 {new Date(task.created_at).toLocaleString("zh-CN")}</span></div>
     <TaskProgress status={task.status} events={events} />
     {error && <div className="inline-alert" role="alert">{error}</div>}
     <div className="task-actions">{terminal && task.status !== "failed" && <Link className="primary-button" to={`/tasks/${task.task_id}/report`}>查看分析报告<ArrowUpRight size={16} /></Link>}{(task.status === "failed" || task.status === "partial") && <button className="secondary-button" onClick={retry} disabled={retrying}><RotateCcw size={15} />{retrying ? "正在重试…" : "重试任务"}</button>}</div>

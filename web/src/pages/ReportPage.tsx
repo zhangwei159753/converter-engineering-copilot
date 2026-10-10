@@ -8,6 +8,7 @@ import type { ConverterReport, Evidence } from "../types";
 
 function reportMarkdown(report: ConverterReport) {
   const hypotheses = report.result.hypotheses ?? [];
+  const comparisons = report.result.comparisons ?? [];
   return [
     `# 变流器工程分析报告`,
     ``,
@@ -18,6 +19,7 @@ function reportMarkdown(report: ConverterReport) {
     ...hypotheses.flatMap((item, index) => [`### ${index + 1}. ${item.hypothesis}`, item.mechanism, `置信度：${item.confidence}；依据：${item.confidence_basis}`, `建议检查：${item.checks.join("；")}`, `引用：${item.supporting_evidence_ids.join(", ") || "无"}`, ``]),
     `## 核验清单`,
     ...(report.result.checks ?? []).map((item) => `- ${item}`),
+    ...(report.mode === "technical_research" ? [``, `## 技术路线对照`, ...comparisons.map((item) => `- **${String(item.item)}**：${String(item.method_or_value)}；条件：${String(item.experimental_conditions ?? "未报告")}；来源：${(item.evidence_ids as string[] | undefined)?.join(", ") ?? "无"}`), ``, `## 研究局限`, ...(report.result.limitations ?? []).map((item) => `- ${item}`), ``, `## 可复现实验步骤`, ...(report.result.experiment_steps ?? []).map((item) => `- ${item}`)] : []),
     ``,
     `## 质量提示`,
     ...report.quality_warnings.map((item) => `- ${item}`),

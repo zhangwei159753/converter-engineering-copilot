@@ -20,7 +20,7 @@ class TaskRunner:
     """Run one background graph per persisted task, with durable events."""
 
     MAX_RETRIES = 2
-    _AVAILABLE_MODES = {TaskMode.FAULT_ANALYSIS}
+    _AVAILABLE_MODES = {TaskMode.FAULT_ANALYSIS, TaskMode.TECHNICAL_RESEARCH}
 
     def __init__(
         self,

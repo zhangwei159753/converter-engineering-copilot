@@ -98,10 +98,22 @@ def test_unregistered_mode_returns_clear_unavailable_response(tmp_path):
     with _client(tmp_path) as (client, _):
         response = client.post(
             "/api/tasks",
-            json={"mode": "technical_research", "inputs": {"question": "Compare inverter topologies"}},
+            json={"mode": "case_retrieval", "inputs": {"symptom": "启动后过流"}},
         )
         assert response.status_code == 501
         assert "not available" in response.json()["detail"].lower()
+
+
+def test_technical_research_mode_is_registered_and_runs(tmp_path):
+    with _client(tmp_path) as (client, _):
+        response = client.post(
+            "/api/tasks",
+            json={"mode": "technical_research", "inputs": {"question": "Compare two-level and three-level topologies"}},
+        )
+        assert response.status_code == 202
+        task_id = response.json()["task"]["task_id"]
+        assert _wait_for_terminal(client, task_id)["status"] == "partial"
+        assert client.get(f"/api/tasks/{task_id}/report").json()["mode"] == "technical_research"
 
 
 def test_sse_replays_events_and_resumes_after_last_event_id(tmp_path):

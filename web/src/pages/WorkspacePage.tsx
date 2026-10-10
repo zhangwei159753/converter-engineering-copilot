@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { ArrowDownRight, ArrowUpRight, FilePlus2, Gauge, Lightbulb, UploadCloud, Zap } from "lucide-react";
 import { createTask, importCases, listTasks } from "../api/client";
 import ModeForm from "../components/ModeForm";
-import type { FaultAnalysisInput, TaskRecord } from "../types";
+import type { TaskRecord } from "../types";
 
 function shortDate(value: string) {
   return new Date(value).toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" });
@@ -20,11 +20,11 @@ export default function WorkspacePage() {
     listTasks().then(setTasks).catch(() => setTasks([]));
   }, []);
 
-  async function submit(input: FaultAnalysisInput) {
+  async function submit(mode: "fault_analysis" | "technical_research", input: Record<string, unknown>) {
     setSubmitting(true);
     setError("");
     try {
-      const { task } = await createTask({ mode: "fault_analysis", inputs: input });
+      const { task } = await createTask({ mode, inputs: input });
       navigate(`/tasks/${task.task_id}`);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "任务创建失败，请稍后重试。");

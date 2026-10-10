@@ -49,4 +49,6 @@ def build_default_deps(config: dict | None = None) -> WorkflowDeps:
     )
 
 
-converter_copilot = build_workflow(TaskMode.FAULT_ANALYSIS, build_default_deps())
+def build_converter_copilot():
+    """Construct the configured default graph when LangGraph loads this entry point."""
+    return build_workflow(TaskMode.FAULT_ANALYSIS, build_default_deps())

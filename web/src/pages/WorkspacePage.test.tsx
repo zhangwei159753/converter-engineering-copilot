@@ -14,13 +14,26 @@ describe("WorkspacePage", () => {
     vi.mocked(api.listTasks).mockResolvedValue([]);
   });
 
-  it("shows all three modes and disables modes awaiting workflows", async () => {
+  it("shows all modes and enables the implemented analysis and research workflows", async () => {
     render(<MemoryRouter><WorkspacePage /></MemoryRouter>);
     expect(await screen.findByText("故障现象分析")).toBeInTheDocument();
     expect(screen.getByText("技术调研与实验设计")).toBeInTheDocument();
     expect(screen.getByText("检修案例检索")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /技术调研与实验设计/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /技术调研与实验设计/ })).toBeEnabled();
     expect(screen.getByRole("button", { name: /检修案例检索/ })).toBeDisabled();
+  });
+
+  it("submits a technical research question", async () => {
+    vi.mocked(api.createTask).mockResolvedValue({ task: {
+      task_id: "research-1", mode: "technical_research", status: "queued", inputs: {},
+      created_at: "2026-10-10T00:00:00Z", updated_at: "2026-10-10T00:00:00Z",
+    } });
+    render(<MemoryRouter><WorkspacePage /></MemoryRouter>);
+    fireEvent.click(screen.getByRole("button", { name: "技术调研与实验设计" }));
+    fireEvent.change(screen.getByLabelText("调研主题"), { target: { value: "两电平与三电平拓扑对照" } });
+    fireEvent.change(screen.getByLabelText("技术范围"), { target: { value: "并网光伏" } });
+    fireEvent.click(screen.getByRole("button", { name: "开始调研" }));
+    await waitFor(() => expect(api.createTask).toHaveBeenCalledWith(expect.objectContaining({ mode: "technical_research" })));
   });
 
   it("validates the fault form and submits a valid task", async () => {

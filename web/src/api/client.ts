@@ -17,7 +17,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export function createTask(payload: { mode: "fault_analysis"; inputs: object }): Promise<TaskAccepted> {
+export function createTask(payload: { mode: "fault_analysis" | "technical_research"; inputs: object }): Promise<TaskAccepted> {
   return request<TaskAccepted>("/api/tasks", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

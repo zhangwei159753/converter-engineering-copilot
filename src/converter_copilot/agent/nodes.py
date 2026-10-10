@@ -8,7 +8,7 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from converter_copilot.agent.prompts import FAULT_ANALYSIS_SYSTEM, format_research_prompt
+from converter_copilot.agent.prompts import FAULT_ANALYSIS_SYSTEM, TECHNICAL_RESEARCH_SYSTEM, format_research_prompt
 from converter_copilot.agent.state import ConverterState
 from converter_copilot.domain.evidence import validate_report_evidence
 from converter_copilot.domain.schemas import (
@@ -18,6 +18,8 @@ from converter_copilot.domain.schemas import (
     FaultAnalysisInput,
     FaultAnalysisReport,
     TaskMode,
+    TechnicalResearchInput,
+    TechnicalResearchReport,
 )
 
 
@@ -30,6 +32,24 @@ def make_intake_node():
             f"{request.equipment_type} {request.symptom} power stage device behavior {request.fault_code or ''}",
             f"{request.equipment_type} {request.symptom} control sensing protection behavior",
             f"{request.equipment_type} {request.symptom} operating conditions {request.operating_conditions}",
+        ]
+        return {"inputs": request.model_dump(mode="json"), "queries": queries, "evidence": []}
+
+    return intake
+
+
+def make_technical_research_intake_node():
+    """Create a bounded technical-research plan from the user's topic and scope."""
+
+    def intake(state: ConverterState) -> dict[str, Any]:
+        request = TechnicalResearchInput.model_validate(state["inputs"])
+        context = " ".join(filter(None, [request.scope, request.time_range]))
+        dimensions = ", ".join(request.comparison_dimensions)
+        base = f"{request.question} {context}"
+        queries = [
+            f"{base} published methods and comparative studies",
+            f"{base} experimental conditions datasets metrics {dimensions}",
+            f"{base} limitations reproducibility contradictory findings",
         ]
         return {"inputs": request.model_dump(mode="json"), "queries": queries, "evidence": []}
 
@@ -167,6 +187,71 @@ def make_generate_node(deps):
                 "claims": claims,
                 "quality_warnings": check.warnings,
                 "completion_status": completion_status,
+            }
+        )
+        return {"report": report, "clarification_questions": []}
+
+    return generate
+
+
+def make_technical_research_generate_node(deps):
+    """Create the structured, source-backed technical comparison report node."""
+
+    async def generate(state: ConverterState) -> dict[str, Any]:
+        evidence = state.get("evidence", [])
+        if not evidence:
+            report = ConverterReport(
+                task_id=state["task_id"],
+                mode=TaskMode.TECHNICAL_RESEARCH,
+                result=TechnicalResearchReport(),
+                claims=[],
+                evidence=[],
+                quality_warnings=["No supporting sources were found; no comparison was generated."],
+                completion_status="partial",
+            )
+            return {"report": report, "clarification_questions": []}
+
+        source_text = [
+            f"[{item.evidence_id}] {item.title} ({item.locator or item.url or 'source'})\n{item.excerpt}"
+            for item in evidence
+        ]
+        prompt = format_research_prompt(f"Research question: {state['inputs']}", source_text)
+        structured_model = deps.model.with_structured_output(TechnicalResearchReport)
+        result = await structured_model.ainvoke(
+            [SystemMessage(content=TECHNICAL_RESEARCH_SYSTEM), HumanMessage(content=prompt)]
+        )
+        result = TechnicalResearchReport.model_validate(result)
+        claims = [
+            Claim(
+                claim_id=f"claim-{index}",
+                text=f"{comparison.item}: {comparison.method_or_value}",
+                claim_type="fact",
+                evidence_ids=comparison.evidence_ids,
+            )
+            for index, comparison in enumerate(result.comparisons, start=1)
+        ]
+        provisional = ConverterReport(
+            task_id=state["task_id"],
+            mode=TaskMode.TECHNICAL_RESEARCH,
+            result=result,
+            claims=claims,
+            evidence=evidence,
+            quality_warnings=[],
+            completion_status="completed",
+        )
+        check = validate_report_evidence(provisional)
+        status_by_claim = {
+            **{claim_id: "supported" for claim_id in check.supported_claim_ids},
+            **{claim_id: "conflicting" for claim_id in check.conflicting_claim_ids},
+            **{claim_id: "unverified" for claim_id in check.unverified_claim_ids},
+        }
+        claims = [claim.model_copy(update={"verification_status": status_by_claim[claim.claim_id]}) for claim in claims]
+        partial = not result.comparisons or bool(check.conflicting_claim_ids or check.unverified_claim_ids)
+        report = provisional.model_copy(
+            update={
+                "claims": claims,
+                "quality_warnings": check.warnings,
+                "completion_status": "partial" if partial else "completed",
             }
         )
         return {"report": report, "clarification_questions": []}

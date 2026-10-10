@@ -11,6 +11,14 @@ def validate_report_evidence(report: ConverterReport) -> EvidenceCheckResult:
     duplicates = {evidence_id for evidence_id, count in counts.items() if count > 1}
     evidence_by_id = {item.evidence_id: item for item in report.evidence if counts[item.evidence_id] == 1}
     warnings = [f"Duplicate evidence ID '{evidence_id}' appears {counts[evidence_id]} times." for evidence_id in sorted(duplicates)]
+    invalid_metadata = set()
+    for item in report.evidence:
+        if item.source_type == "web" and not item.url:
+            invalid_metadata.add(item.evidence_id)
+            warnings.append(f"Evidence '{item.evidence_id}' is missing a traceable source URL.")
+        elif item.source_type == "local_document" and (not item.document_id or not item.locator):
+            invalid_metadata.add(item.evidence_id)
+            warnings.append(f"Evidence '{item.evidence_id}' is missing its document ID or locator.")
     supported: list[str] = []
     conflicting: list[str] = []
     unverified: list[str] = []
@@ -23,11 +31,14 @@ def validate_report_evidence(report: ConverterReport) -> EvidenceCheckResult:
 
         missing = sorted({evidence_id for evidence_id in claim.evidence_ids if evidence_id not in counts})
         duplicated = sorted({evidence_id for evidence_id in claim.evidence_ids if evidence_id in duplicates})
+        metadata_missing = sorted({evidence_id for evidence_id in claim.evidence_ids if evidence_id in invalid_metadata})
         if missing:
             warnings.append(f"Claim '{claim.claim_id}' references missing evidence IDs: {', '.join(missing)}.")
         if duplicated:
             warnings.append(f"Claim '{claim.claim_id}' references ambiguous duplicate evidence IDs: {', '.join(duplicated)}.")
-        if missing or duplicated:
+        if metadata_missing:
+            warnings.append(f"Claim '{claim.claim_id}' references evidence with missing source metadata: {', '.join(metadata_missing)}.")
+        if missing or duplicated or metadata_missing:
             unverified.append(claim.claim_id)
             continue
 
