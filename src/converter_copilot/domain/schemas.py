@@ -21,8 +21,21 @@ class FaultAnalysisInput(BaseModel):
     equipment_type: str = Field(min_length=1)
     symptom: str = Field(min_length=1)
     operating_conditions: dict[str, object] = Field(default_factory=dict)
+    source_context: dict[str, object] = Field(default_factory=dict)
     fault_code: str | None = None
     attachment_ids: list[str] = Field(default_factory=list)
+
+
+class WorkOrderReview(BaseModel):
+    """Append-only local human review of an analysis linked to a work order."""
+
+    work_order_id: str
+    task_id: str
+    version: int
+    reviewer: str
+    verdict: Literal["accepted", "needs_more_information", "rejected"]
+    note: str | None = None
+    reviewed_at: datetime
 
 
 class TechnicalResearchInput(BaseModel):
@@ -58,6 +71,8 @@ class Evidence(BaseModel):
     accessed_at: datetime
     related_claim_ids: list[str] = Field(default_factory=list)
     source_status: Literal["available", "conflicting", "unavailable"]
+    equipment_type: str | None = None
+    applicability: Literal["direct", "related", "cross_equipment", "unknown"] = "unknown"
 
 
 class DocumentChunk(BaseModel):
@@ -88,15 +103,24 @@ class Claim(BaseModel):
 
 
 class FaultHypothesis(BaseModel):
-    """Candidate cause and checks for a reported fault symptom."""
+    """Candidate cause directly supported by cited source material, with checks."""
 
-    hypothesis: str
-    mechanism: str
+    hypothesis: str = Field(description="A candidate cause that is directly supported by at least one cited source excerpt.")
+    mechanism: str = Field(description="The causal mechanism described by the cited source; do not fill gaps with unsupported assumptions.")
     confidence: Literal["low", "medium", "high"]
-    confidence_basis: str
-    supporting_evidence_ids: list[str] = Field(default_factory=list)
-    opposing_evidence_ids: list[str] = Field(default_factory=list)
-    checks: list[str] = Field(default_factory=list)
+    confidence_basis: str = Field(description="Explain how directly and consistently the cited evidence supports this hypothesis.")
+    supporting_evidence_ids: list[str] = Field(
+        default_factory=list,
+        description="Exact IDs of excerpts that directly support the hypothesis. If there is no direct support, omit the hypothesis.",
+    )
+    opposing_evidence_ids: list[str] = Field(
+        default_factory=list,
+        description="Exact IDs of excerpts that conflict with or weaken the hypothesis.",
+    )
+    checks: list[str] = Field(
+        default_factory=list,
+        description="Safe information-gathering checks; these are recommendations, not evidence-backed conclusions.",
+    )
 
 
 class FaultAnalysisReport(BaseModel):
@@ -280,6 +304,7 @@ class ConverterReport(BaseModel):
     result: FaultAnalysisReport | TechnicalResearchReport | CaseRetrievalReport
     claims: list[Claim] = Field(default_factory=list)
     evidence: list[Evidence] = Field(default_factory=list)
+    clarification_questions: list[str] = Field(default_factory=list)
     quality_warnings: list[str] = Field(default_factory=list)
     completion_status: Literal["completed", "partial", "failed"]
 

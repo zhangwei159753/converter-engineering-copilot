@@ -4,7 +4,7 @@ import sqlite3
 from collections.abc import Callable
 
 Migration = Callable[[sqlite3.Connection], None]
-CURRENT_SCHEMA_VERSION = 5
+CURRENT_SCHEMA_VERSION = 7
 
 
 def _create_base_schema(connection: sqlite3.Connection) -> None:
@@ -172,12 +172,52 @@ def _add_evaluation_reviews(connection: sqlite3.Connection) -> None:
     connection.execute("CREATE INDEX idx_evaluation_review_events_review ON evaluation_review_events(review_id, event_id)")
 
 
+def _add_work_order_reviews(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """CREATE TABLE work_order_analyses (
+            work_order_id TEXT NOT NULL,
+            task_id TEXT NOT NULL UNIQUE REFERENCES tasks(task_id) ON DELETE CASCADE,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY(work_order_id, task_id)
+        )"""
+    )
+    connection.execute("CREATE INDEX idx_work_order_analyses_order ON work_order_analyses(work_order_id, created_at)")
+    connection.execute(
+        """CREATE TABLE work_order_review_events (
+            event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            work_order_id TEXT NOT NULL,
+            task_id TEXT NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE,
+            version INTEGER NOT NULL,
+            reviewer TEXT NOT NULL,
+            verdict TEXT NOT NULL CHECK(verdict IN ('accepted', 'needs_more_information', 'rejected')),
+            note TEXT,
+            reviewed_at TEXT NOT NULL,
+            UNIQUE(work_order_id, task_id, version),
+            FOREIGN KEY(work_order_id, task_id)
+                REFERENCES work_order_analyses(work_order_id, task_id) ON DELETE CASCADE
+        )"""
+    )
+    connection.execute(
+        "CREATE INDEX idx_work_order_review_history ON work_order_review_events(work_order_id, task_id, version)"
+    )
+
+
+def _add_evaluation_output_context(connection: sqlite3.Connection) -> None:
+    columns = {row[1] for row in connection.execute("PRAGMA table_info(evaluation_examples)")}
+    if "output_context_json" not in columns:
+        connection.execute(
+            "ALTER TABLE evaluation_examples ADD COLUMN output_context_json TEXT NOT NULL DEFAULT '{}'"
+        )
+
+
 MIGRATIONS: list[tuple[int, Migration]] = [
     (1, _create_base_schema),
     (2, _add_task_lifecycle_columns),
     (3, _add_import_ledger),
     (4, _add_import_candidate_ready),
     (5, _add_evaluation_reviews),
+    (6, _add_work_order_reviews),
+    (7, _add_evaluation_output_context),
 ]
 
 

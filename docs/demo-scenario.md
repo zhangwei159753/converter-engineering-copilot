@@ -35,3 +35,9 @@ Run `uv run python evals/converter_copilot/run_eval.py --mode fault_analysis` wi
 Describe these rows and any generated output as synthetic and model-assisted. Do not claim measured recall, field validation, or maintenance savings. The evidence check validates traceable citation IDs and conflict flags, not whether an engineering claim is objectively correct. A qualified engineer should confirm any proposed diagnosis against authorized manuals, actual measurements, and operating procedures.
 
 Human review creates an auditable annotation, not proof of field correctness or maintenance benefit. Do not substitute it for equipment manuals, field measurements, or site safety procedures.
+
+## 7. Run the work-order assistance flow
+
+Open **工单研判** in the left navigation. Select a synthetic ticket such as `WO-2026-0418`; inspect its model, firmware, alarm code, operating context, attachments, and missing-field warning. Choose **发起辅助研判** to submit the mapped fields to the existing `fault_analysis` workflow. The browser opens the task progress page and the report, when ready, links back to the source ticket.
+
+Return to the work order and select the completed analysis. Open its evidence report, then record a reviewer name, a verdict (**接受建议**, **需补充信息**, or **不采纳**), and an optional note. Re-reviewing appends a new version to the local audit history. The synthetic ticket source is read-only; the review does not update a CMMS, issue equipment commands, or establish field correctness.

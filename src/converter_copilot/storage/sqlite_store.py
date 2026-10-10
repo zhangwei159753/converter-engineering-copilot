@@ -17,6 +17,7 @@ from converter_copilot.domain.schemas import (
     TaskEvent,
     TaskMode,
     TaskRecord,
+    WorkOrderReview,
 )
 from converter_copilot.storage.migrations import CURRENT_SCHEMA_VERSION, migrate
 
@@ -80,10 +81,10 @@ class SQLiteStore:
         return backup_path
 
     def create_task(
-        self, request: TaskCreate, *, idempotency_key: str | None = None
+        self, request: TaskCreate, *, idempotency_key: str | None = None, work_order_id: str | None = None
     ) -> tuple[TaskRecord, bool]:
         """Persist a queued task and event, reusing a matching request key."""
-        request_hash = self._request_hash(request)
+        request_hash = self._request_hash(request, work_order_id=work_order_id)
         self._validate_idempotency_key(idempotency_key)
         now = _now()
         record = self._new_task_record(request, now)
@@ -113,6 +114,11 @@ class SQLiteStore:
                 ),
             )
             self._insert_event(connection, record.task_id, "queued", "queued", "任务已排队。", now)
+            if work_order_id is not None:
+                connection.execute(
+                    "INSERT INTO work_order_analyses(work_order_id, task_id, created_at) VALUES (?, ?, ?)",
+                    (work_order_id, record.task_id, now.isoformat()),
+                )
         return record, False
 
     def create_retry(
@@ -122,9 +128,10 @@ class SQLiteStore:
         *,
         idempotency_key: str | None = None,
         max_retries: int = 2,
+        work_order_id: str | None = None,
     ) -> tuple[TaskRecord, bool]:
         """Atomically create a bounded retry, its relationship, and events."""
-        request_hash = self._request_hash(request)
+        request_hash = self._request_hash(request, work_order_id=work_order_id)
         self._validate_idempotency_key(idempotency_key)
         now = _now()
         record = self._new_task_record(request, now)
@@ -175,6 +182,11 @@ class SQLiteStore:
             self._insert_event(
                 connection, record.task_id, "retry", "queued", f"重试任务，来源任务 {original_task_id}。", now
             )
+            if work_order_id is not None:
+                connection.execute(
+                    "INSERT INTO work_order_analyses(work_order_id, task_id, created_at) VALUES (?, ?, ?)",
+                    (work_order_id, record.task_id, now.isoformat()),
+                )
         return record, False
 
     def get_task(self, task_id: str) -> TaskRecord | None:
@@ -625,9 +637,99 @@ class SQLiteStore:
         )
 
     @staticmethod
-    def _request_hash(request: TaskCreate) -> str:
-        canonical = json.dumps(request.model_dump(mode="json"), sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    def _request_hash(request: TaskCreate, *, work_order_id: str | None = None) -> str:
+        canonical_request = request.model_dump(mode="json")
+        canonical_payload = (
+            canonical_request if work_order_id is None
+            else {"request": canonical_request, "work_order_id": work_order_id}
+        )
+        canonical = json.dumps(
+            canonical_payload, sort_keys=True, ensure_ascii=False, separators=(",", ":")
+        )
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    def list_work_order_task_ids(self, work_order_id: str) -> list[str]:
+        """Return analysis task IDs linked to one work order, newest first."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT task_id FROM work_order_analyses WHERE work_order_id = ? ORDER BY created_at DESC, task_id DESC",
+                (work_order_id,),
+            ).fetchall()
+        return [row["task_id"] for row in rows]
+
+    def is_work_order_task(self, work_order_id: str, task_id: str) -> bool:
+        """Check the persisted work-order/task association."""
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT 1 FROM work_order_analyses WHERE work_order_id = ? AND task_id = ?",
+                (work_order_id, task_id),
+            ).fetchone()
+        return row is not None
+
+    def get_task_work_order_id(self, task_id: str) -> str | None:
+        """Return the source work order for a task, when the task came from one."""
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT work_order_id FROM work_order_analyses WHERE task_id = ?", (task_id,)
+            ).fetchone()
+        return row["work_order_id"] if row else None
+
+    def save_work_order_review(
+        self,
+        work_order_id: str,
+        task_id: str,
+        *,
+        reviewer: str,
+        verdict: str,
+        note: str | None,
+    ) -> WorkOrderReview:
+        """Append a review version after atomically checking task ownership and state."""
+        reviewed_at = _now()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            task = connection.execute(
+                "SELECT status FROM tasks WHERE task_id = ?", (task_id,)
+            ).fetchone()
+            linked = connection.execute(
+                "SELECT 1 FROM work_order_analyses WHERE work_order_id = ? AND task_id = ?",
+                (work_order_id, task_id),
+            ).fetchone()
+            if task is None or linked is None:
+                raise KeyError(task_id)
+            if task["status"] not in {"completed", "partial"}:
+                raise ValueError("Only an analysis with a completed report can be reviewed.")
+            version = int(connection.execute(
+                "SELECT COALESCE(MAX(version), 0) + 1 FROM work_order_review_events "
+                "WHERE work_order_id = ? AND task_id = ?",
+                (work_order_id, task_id),
+            ).fetchone()[0])
+            connection.execute(
+                """INSERT INTO work_order_review_events(
+                    work_order_id, task_id, version, reviewer, verdict, note, reviewed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (work_order_id, task_id, version, reviewer, verdict, note, reviewed_at.isoformat()),
+            )
+        return WorkOrderReview(
+            work_order_id=work_order_id,
+            task_id=task_id,
+            version=version,
+            reviewer=reviewer,
+            verdict=verdict,
+            note=note,
+            reviewed_at=reviewed_at,
+        )
+
+    def list_work_order_reviews(self, work_order_id: str, task_id: str | None = None) -> list[WorkOrderReview]:
+        """Return immutable work-order review history in creation order."""
+        query = "SELECT * FROM work_order_review_events WHERE work_order_id = ?"
+        params: tuple[str, ...] = (work_order_id,)
+        if task_id is not None:
+            query += " AND task_id = ?"
+            params += (task_id,)
+        query += " ORDER BY task_id, version"
+        with self._connect() as connection:
+            rows = connection.execute(query, params).fetchall()
+        return [WorkOrderReview.model_validate(dict(row)) for row in rows]
 
     @staticmethod
     def _validate_idempotency_key(key: str | None) -> None:

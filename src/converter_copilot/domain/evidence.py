@@ -1,6 +1,7 @@
 """Deterministic citation integrity checks for generated reports."""
 
 from collections import Counter
+import re
 
 from converter_copilot.domain.schemas import ConverterReport, EvidenceCheckResult
 
@@ -43,6 +44,18 @@ def validate_report_evidence(report: ConverterReport) -> EvidenceCheckResult:
             continue
 
         sources = [evidence_by_id[evidence_id] for evidence_id in claim.evidence_ids]
+        if any(source.applicability in {"related", "cross_equipment"} for source in sources):
+            unverified.append(claim.claim_id)
+            warnings.append(
+                f"Claim '{claim.claim_id}' cites related or cross-equipment material that cannot directly support a target-equipment cause."
+            )
+            continue
+        if _causality_exceeds_source(claim.text, sources):
+            unverified.append(claim.claim_id)
+            warnings.append(
+                f"Claim '{claim.claim_id}' makes a definitive causal assertion stronger than its tentative source wording."
+            )
+            continue
         if any(source.source_status == "conflicting" for source in sources):
             conflicting.append(claim.claim_id)
         elif all(source.source_status == "available" for source in sources):
@@ -55,4 +68,15 @@ def validate_report_evidence(report: ConverterReport) -> EvidenceCheckResult:
         conflicting_claim_ids=conflicting,
         unverified_claim_ids=unverified,
         warnings=warnings,
+    )
+
+
+_DEFINITIVE_CAUSALITY = re.compile(r"导致|引起|造成|誘发|诱发|根因是|原因是|caused by|causes|results in", re.IGNORECASE)
+_TENTATIVE_SOURCE = re.compile(r"假设|可能相关|可能导致|需核对|需要核对|尚未验证|不是现场验证结论|不代表真实|may be related|hypothesis|not validated", re.IGNORECASE)
+
+
+def _causality_exceeds_source(claim_text: str, sources) -> bool:
+    """Reject definitive cause language when the cited material explicitly remains tentative."""
+    return bool(_DEFINITIVE_CAUSALITY.search(claim_text)) and any(
+        _TENTATIVE_SOURCE.search(source.excerpt) for source in sources
     )

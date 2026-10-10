@@ -13,6 +13,7 @@ from converter_copilot.domain.schemas import ConverterReport, TaskCreate
 from converter_copilot.evaluation.metrics import (
     build_evaluation_summary,
     compute_citation_coverage,
+    compute_citation_integrity_rate,
     compute_evidence_support_rate,
     compute_retrieval_recall,
     compute_schema_pass_rate,
@@ -81,6 +82,11 @@ async def evaluate_records(
                 "source_type": str(record.get("source_type", "unknown")),
                 "inputs": request.inputs.model_dump(mode="json"),
                 "task_id": task_id,
+                "output_context": {
+                    "completion_status": report.completion_status,
+                    "quality_warnings": report.quality_warnings,
+                    "clarification_questions": report.clarification_questions,
+                },
                 "claims": [
                     {"claim_id": claim.claim_id, "text": claim.text, "evidence_ids": claim.evidence_ids}
                     for claim in report.claims
@@ -93,6 +99,8 @@ async def evaluate_records(
                         "locator": item.locator,
                         "url": item.url,
                         "source_status": item.source_status,
+                        "equipment_type": item.equipment_type,
+                        "applicability": item.applicability,
                         "related_claim_ids": sorted(set(item.related_claim_ids + claim_ids_by_evidence.get(item.evidence_id, []))),
                     }
                     for item in report.evidence
@@ -116,6 +124,19 @@ async def evaluate_records(
                 "error_type": type(error).__name__,
                 "message": "Evaluation example failed; inspect local process logs for details.",
             }
+            error_code = "evaluation_schema_validation_failed" if type(error).__name__ == "ValidationError" else "evaluation_example_failed"
+            output_context: dict[str, Any] = {
+                "completion_status": "failed",
+                "failure": {"error_code": error_code, "error_type": type(error).__name__},
+            }
+            if type(error).__name__ == "ValidationError" and hasattr(error, "errors"):
+                try:
+                    output_context["failure"]["field_paths"] = sorted({
+                        ".".join(str(part) for part in item.get("loc", ()))
+                        for item in error.errors(include_url=False, include_context=False, include_input=False)
+                    })[:12]
+                except (TypeError, ValueError):
+                    pass
             failures.append(failure)
             outcomes.append({"example_id": example_id, "task_id": task_id, "status": "failed", "latency_ms": round(latency, 3), "error": failure})
             review_examples.append({
@@ -123,6 +144,7 @@ async def evaluate_records(
                 "source_type": str(record.get("source_type", "unknown")),
                 "inputs": record.get("inputs", {}),
                 "task_id": task_id,
+                "output_context": output_context,
                 "claims": [],
                 "evidence": [],
             })
@@ -145,6 +167,7 @@ async def evaluate_records(
         example_count=len(records),
         retrieval_recall=compute_retrieval_recall(expected_ids, retrieved_ids, k=recall_at_k),
         citation_coverage=compute_citation_coverage(claims),
+        citation_integrity_rate=compute_citation_integrity_rate(claims),
         schema_pass_rate=compute_schema_pass_rate(schema_results),
         evidence_support_rate=compute_evidence_support_rate(manual_labels),
         latencies_ms=latencies,
@@ -154,6 +177,7 @@ async def evaluate_records(
             "retrieval_labeled_examples": sum(bool(item) for item in expected_ids),
             "reviewed_evidence_labels": len(reviewed_labels),
             "citation_claims": len(claims),
+            "citation_integrity_claims": sum(bool(claim.evidence_ids) for claim in claims),
         },
     )
     summary["recall_at_k"] = recall_at_k

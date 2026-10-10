@@ -1,4 +1,4 @@
-import type { CaseImportResult, ConverterReport, EvaluationExample, EvaluationReviewEvent, EvaluationSummary, ImportSummary, TaskAccepted, TaskEvent, TaskRecord } from "../types";
+import type { CaseImportResult, ConverterReport, EvaluationExample, EvaluationReviewEvent, EvaluationSummary, ImportSummary, TaskAccepted, TaskEvent, TaskRecord, WorkOrder, WorkOrderDetail, WorkOrderReview } from "../types";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -91,6 +91,31 @@ export function saveEvaluationReview(reviewId: string, payload: { reviewer_id: s
 
 export function getEvaluationHistory(reviewId: string): Promise<EvaluationReviewEvent[]> {
   return request(`/api/evaluations/examples/${encodeURIComponent(reviewId)}/history`);
+}
+
+export function listWorkOrders(params: { q?: string; status?: string } = {}): Promise<{ items: WorkOrder[]; total: number; synthetic_demo: true }> {
+  const query = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => { if (value) query.set(key, value); });
+  return request(`/api/work-orders?${query}`);
+}
+
+export function getWorkOrder(workOrderId: string): Promise<WorkOrderDetail> {
+  return request(`/api/work-orders/${encodeURIComponent(workOrderId)}`);
+}
+
+export function createWorkOrderAnalysis(workOrderId: string): Promise<{ task: TaskRecord; reused: boolean; work_order_id: string }> {
+  return request(`/api/work-orders/${encodeURIComponent(workOrderId)}/analyses`, {
+    method: "POST",
+    headers: { "Idempotency-Key": newIdempotencyKey() },
+  });
+}
+
+export function saveWorkOrderReview(workOrderId: string, taskId: string, payload: { reviewer: string; verdict: WorkOrderReview["verdict"]; note?: string }): Promise<WorkOrderReview> {
+  return request(`/api/work-orders/${encodeURIComponent(workOrderId)}/analyses/${encodeURIComponent(taskId)}/review`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
 }
 
 const pause = (milliseconds: number, signal: AbortSignal) => new Promise<void>((resolve) => {

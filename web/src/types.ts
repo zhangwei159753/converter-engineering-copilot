@@ -37,6 +37,8 @@ export interface Evidence {
   accessed_at: string;
   related_claim_ids: string[];
   source_status: "available" | "conflicting" | "unavailable";
+  equipment_type?: string | null;
+  applicability?: "direct" | "related" | "cross_equipment" | "unknown";
 }
 
 export interface Claim {
@@ -71,11 +73,52 @@ export interface ConverterReport {
   claims: Claim[];
   evidence: Evidence[];
   quality_warnings: string[];
+  clarification_questions?: string[];
   completion_status: "completed" | "partial" | "failed";
 }
 
 export interface TaskAccepted {
   task: TaskRecord;
+}
+
+export interface WorkOrder {
+  work_order_id: string;
+  equipment_model: string;
+  serial_number: string;
+  firmware_version: string | null;
+  alarm_code: string;
+  symptom: string;
+  occurred_at: string;
+  operating_conditions: Record<string, string | number | null>;
+  attachment_names: string[];
+  missing_fields: string[];
+  severity: "low" | "medium" | "high";
+  status: "open" | "investigating" | "resolved";
+  synthetic_demo: true;
+  analysis_count?: number;
+}
+
+export interface WorkOrderReview {
+  work_order_id: string;
+  task_id: string;
+  version: number;
+  reviewer: string;
+  verdict: "accepted" | "needs_more_information" | "rejected";
+  note: string | null;
+  reviewed_at: string;
+}
+
+export interface WorkOrderAnalysis {
+  task: TaskRecord;
+  report: ConverterReport | null;
+  review_history: WorkOrderReview[];
+  latest_review: WorkOrderReview | null;
+}
+
+export interface WorkOrderDetail {
+  work_order: WorkOrder;
+  analyses: WorkOrderAnalysis[];
+  synthetic_demo: true;
 }
 
 export interface CaseImportResult {
@@ -106,12 +149,13 @@ export interface ImportSummary {
 }
 
 export type EvidenceReviewLabel = "supported" | "unsupported" | "unverified";
-export interface EvaluationEvidence { evidence_id: string; excerpt?: string; source_type?: string; locator?: string | null; url?: string | null; source_status?: string; related_claim_ids?: string[] }
+export interface EvaluationEvidence { evidence_id: string; excerpt?: string; source_type?: string; locator?: string | null; url?: string | null; source_status?: string; related_claim_ids?: string[]; equipment_type?: string | null; applicability?: "direct" | "related" | "cross_equipment" | "unknown" }
 export interface EvaluationClaim { claim_id: string; text: string; evidence_ids?: string[] }
 export interface EvaluationExample {
   review_id: string; bundle_id: string; example_id: string; mode: string; dataset_version: string;
   source_type: string; inputs: Record<string, unknown>; task_id: string; claims: EvaluationClaim[];
   evidence: EvaluationEvidence[]; status: "pending" | "reviewed"; reviewer_id: string | null;
+  output_context?: { completion_status?: string; quality_warnings?: string[]; clarification_questions?: string[]; failure?: { error_code?: string; error_type?: string; field_paths?: string[] } };
   reviewed_at: string | null; label_version: number;
   evidence_labels: Array<{ evidence_id: string; claim_id: string; label: EvidenceReviewLabel }>;
   expected_retrieval_ids: string[]; note: string | null;

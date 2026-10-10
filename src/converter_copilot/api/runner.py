@@ -71,12 +71,14 @@ class TaskRunner:
         return build_default_deps()
 
     async def create(
-        self, request: TaskCreate, *, idempotency_key: str | None = None
+        self, request: TaskCreate, *, idempotency_key: str | None = None, work_order_id: str | None = None
     ) -> tuple[TaskRecord, bool]:
         """Validate availability and persist a task for worker discovery."""
         if request.mode not in self._AVAILABLE_MODES:
             raise WorkflowUnavailableError(f"The {request.mode.value} workflow is not available yet.")
-        record, reused = self.store.create_task(request, idempotency_key=idempotency_key)
+        record, reused = self.store.create_task(
+            request, idempotency_key=idempotency_key, work_order_id=work_order_id
+        )
         return record, reused
 
     async def retry(self, task_id: str, *, idempotency_key: str | None = None) -> tuple[TaskRecord, bool]:
@@ -89,8 +91,10 @@ class TaskRunner:
         request = TaskCreate(mode=original.mode, inputs=original.inputs)
         if request.mode not in self._AVAILABLE_MODES:
             raise WorkflowUnavailableError(f"The {request.mode.value} workflow is not available yet.")
+        work_order_id = self.store.get_task_work_order_id(task_id)
         retry, reused = self.store.create_retry(
-            task_id, request, idempotency_key=idempotency_key, max_retries=self.MAX_RETRIES
+            task_id, request, idempotency_key=idempotency_key, max_retries=self.MAX_RETRIES,
+            work_order_id=work_order_id,
         )
         return retry, reused
 

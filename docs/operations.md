@@ -49,6 +49,12 @@ Each run writes a metric summary and a separate `*-review.json` bundle under `.d
 
 The built-in JSONL records are synthetic and unreviewed. Empty gold sets and missing manual labels produce `null` metrics and `insufficient_labels`; the sample-count fields show what was actually scored. A local reviewer identifier is free text and is not an authenticated account. Human labels describe review of the captured output; they do not validate field facts or maintenance outcomes. Do not use these workflows for unauthorized sensitive data or as a substitute for site procedures.
 
+## Work-order assistance
+
+The **工单研判** page uses a package-local synthetic fixture through read-only endpoints under `/api/work-orders`. Selecting a row and starting analysis maps the ticket's alarm code, symptom, equipment model, available operating conditions, attachments, and missing-field list into the existing fault-analysis task. Task-to-ticket links and review history are persisted in SQLite. Review versions are append-only and contain a free-text local reviewer label, verdict, note, and timestamp.
+
+This fixture does not connect to a CMMS/ERP, telemetry source, or manufacturer system. Do not interpret its tickets as incidents or review verdicts as externally executed actions. Replacing the fixture with an authorized connector requires a separate integration design covering credentials, field mapping, paging/rate limits, audit, and data retention. The application does not write device parameters or replace equipment manuals, qualified engineering judgment, or site safety procedures.
+
 ## CI and scope roadmap
 
 The GitHub Actions `Product CI` workflow runs deterministic product tests, product Ruff checks, frontend tests/build, legacy test collection, and Docker image builds without provider secrets. The legacy collection job proves tests are discoverable; it does not claim the credentialed live upstream evaluations passed. Run the local product checks with:

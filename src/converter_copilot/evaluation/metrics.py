@@ -24,11 +24,29 @@ def compute_retrieval_recall(
 
 
 def compute_citation_coverage(claims: Sequence[Mapping[str, Any] | Any]) -> float | None:
-    """Return the share of claims that cite at least one evidence item."""
+    """Return the share of claims that cite at least one evidence item.
+
+    This measures citation presence only; it does not check citation validity or
+    whether the cited excerpt semantically supports the claim.
+    """
     if not claims:
         return None
     cited = sum(bool(_value(claim, "evidence_ids", [])) for claim in claims)
     return cited / len(claims)
+
+
+def compute_citation_integrity_rate(claims: Sequence[Mapping[str, Any] | Any]) -> float | None:
+    """Return the share of cited claims whose IDs passed deterministic checks.
+
+    The workflow assigns ``supported`` only when all cited IDs are unique,
+    traceable, and point to available sources; ``conflicting`` links are also
+    structurally valid. Neither status verifies semantic entailment.
+    """
+    cited = [claim for claim in claims if _value(claim, "evidence_ids", [])]
+    if not cited:
+        return None
+    valid = sum(_value(claim, "verification_status", "unverified") in {"supported", "conflicting"} for claim in cited)
+    return valid / len(cited)
 
 
 def compute_schema_pass_rate(results: Sequence[bool]) -> float | None:
@@ -57,6 +75,7 @@ def build_evaluation_summary(
     latencies_ms: Sequence[float],
     costs_usd: Sequence[float],
     failures: Sequence[Mapping[str, str]],
+    citation_integrity_rate: float | None = None,
     metric_sample_counts: Mapping[str, int] | None = None,
 ) -> dict[str, Any]:
     """Build a JSON-ready summary while keeping unavailable measurements null."""
@@ -70,12 +89,14 @@ def build_evaluation_summary(
         "retrieval_labeled_examples": 0,
         "reviewed_evidence_labels": 0,
         "citation_claims": 0,
+        "citation_integrity_claims": 0,
         "schema_examples": example_count,
         **dict(metric_sample_counts or {}),
     }
     metric_status = {
         "retrieval_recall_at_k": "measured" if retrieval_recall is not None else "insufficient_labels",
         "citation_coverage": "measured" if citation_coverage is not None else "insufficient_outputs",
+        "citation_integrity_rate": "measured" if citation_integrity_rate is not None else "insufficient_outputs",
         "schema_pass_rate": "measured" if schema_pass_rate is not None else "insufficient_outputs",
         "manual_evidence_support_rate": "measured" if evidence_support_rate is not None else "insufficient_labels",
     }
@@ -93,6 +114,7 @@ def build_evaluation_summary(
         "example_count": example_count,
         "retrieval_recall_at_k": retrieval_recall,
         "citation_coverage": citation_coverage,
+        "citation_integrity_rate": citation_integrity_rate,
         "schema_pass_rate": schema_pass_rate,
         "manual_evidence_support_rate": evidence_support_rate,
         "metric_status": metric_status,

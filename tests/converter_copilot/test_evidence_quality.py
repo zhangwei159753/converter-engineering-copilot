@@ -32,6 +32,31 @@ def _evidence(evidence_id="ev-1", source_status="available"):
     }
 
 
+def test_tentative_source_cannot_support_a_definitive_causal_claim():
+    evidence = _evidence()
+    evidence["excerpt"] = "合成测试假设：冷却回路状态可能与功率模块温升相关；不是现场验证结论。"
+    claim = _claim("ev-1")
+    claim["text"] = "冷却回路状态异常导致功率模块温升。"
+
+    result = validate_report_evidence(_report([claim], [evidence]))
+
+    assert result.supported_claim_ids == []
+    assert result.unverified_claim_ids == ["claim-1"]
+    assert any("causal" in warning.lower() for warning in result.warnings)
+
+
+def test_cautious_correlation_claim_remains_eligible_with_tentative_source():
+    evidence = _evidence()
+    evidence["excerpt"] = "合成测试假设：冷却回路状态可能与功率模块温升相关；不是现场验证结论。"
+    claim = _claim("ev-1")
+    claim["text"] = "冷却回路状态可能与功率模块温升相关。"
+
+    result = validate_report_evidence(_report([claim], [evidence]))
+
+    assert result.supported_claim_ids == ["claim-1"]
+    assert result.unverified_claim_ids == []
+
+
 def test_valid_citation_supports_claim():
     result = validate_report_evidence(_report([_claim("ev-1")], [_evidence()]))
     assert result.supported_claim_ids == ["claim-1"]

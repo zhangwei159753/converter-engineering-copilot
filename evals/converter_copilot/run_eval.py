@@ -33,7 +33,30 @@ def _load_jsonl(path: Path) -> list[dict]:
     return records
 
 
-async def _run(modes: list[str], output_dir: Path, recall_at_k: int) -> list[dict]:
+def _dataset_paths(modes: list[str], custom_dataset: str | Path | None = None) -> dict[str, Path]:
+    """Resolve the default or one explicitly selected workflow dataset."""
+    if custom_dataset is not None:
+        if len(modes) != 1:
+            raise ValueError("--dataset can only be used with one workflow mode.")
+        return {modes[0]: Path(custom_dataset).expanduser().resolve()}
+    return {mode: (HERE / f"{mode}.jsonl").resolve() for mode in modes}
+
+
+def _dataset_label(path: Path) -> str:
+    """Prefer a repository-relative dataset label when the file is in the project."""
+    repository_root = HERE.parent.parent.resolve()
+    try:
+        return path.resolve().relative_to(repository_root).as_posix()
+    except ValueError:
+        return str(path.resolve())
+
+
+async def _run(
+    modes: list[str],
+    output_dir: Path,
+    recall_at_k: int,
+    dataset_paths: dict[str, Path] | None = None,
+) -> list[dict]:
     config = RuntimeConfig.from_env()
     if not config.deepseek_api_key:
         raise RuntimeError("DEEPSEEK_API_KEY is required for live evaluation. Add it to .env or the environment.")
@@ -42,9 +65,10 @@ async def _run(modes: list[str], output_dir: Path, recall_at_k: int) -> list[dic
     summaries = []
     output_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    dataset_paths = dataset_paths or _dataset_paths(modes)
     for mode_name in modes:
         mode = TaskMode(mode_name)
-        dataset = HERE / f"{mode.value}.jsonl"
+        dataset = dataset_paths[mode.value]
         records = _load_jsonl(dataset)
         issues = validate_dataset(records, mode=mode.value)
         if issues:
@@ -59,7 +83,7 @@ async def _run(modes: list[str], output_dir: Path, recall_at_k: int) -> list[dic
             recall_at_k=recall_at_k,
             dataset_version=dataset_version,
         )
-        summary["dataset"] = str(dataset.relative_to(HERE.parent.parent))
+        summary["dataset"] = _dataset_label(dataset)
         summary["generated_at"] = datetime.now(timezone.utc).isoformat()
         summary["tracing_enabled"] = config.tracing_enabled
         review_bundle = summary.pop("review_bundle")
@@ -77,14 +101,20 @@ def main() -> int:
     """Validate datasets, run selected workflows, and write local artifacts."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mode", choices=[TaskMode.FAULT_ANALYSIS.value, TaskMode.TECHNICAL_RESEARCH.value], action="append")
+    parser.add_argument("--dataset", type=Path, help="Use a specific JSONL dataset; requires exactly one --mode (defaults to fault_analysis).")
     parser.add_argument("--output-dir", type=Path, default=Path(".data/evaluation_results"))
     parser.add_argument("--recall-at-k", type=int, default=5)
     args = parser.parse_args()
     if args.recall_at_k < 1:
         parser.error("--recall-at-k must be at least 1")
-    modes = args.mode or [TaskMode.FAULT_ANALYSIS.value, TaskMode.TECHNICAL_RESEARCH.value]
+    modes = args.mode or (
+        [TaskMode.FAULT_ANALYSIS.value]
+        if args.dataset is not None
+        else [TaskMode.FAULT_ANALYSIS.value, TaskMode.TECHNICAL_RESEARCH.value]
+    )
     try:
-        results = asyncio.run(_run(modes, args.output_dir, args.recall_at_k))
+        dataset_paths = _dataset_paths(modes, args.dataset)
+        results = asyncio.run(_run(modes, args.output_dir, args.recall_at_k, dataset_paths))
     except (RuntimeError, ValueError) as error:
         parser.exit(2, f"Evaluation stopped: {error}\n")
     sys.stdout.write(json.dumps(results, ensure_ascii=False, indent=2) + "\n")

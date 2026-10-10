@@ -3,11 +3,13 @@
 import asyncio
 import hashlib
 import inspect
+import re
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
+from pydantic import ValidationError
 
 from converter_copilot.agent.prompts import (
     FAULT_ANALYSIS_SYSTEM,
@@ -16,6 +18,7 @@ from converter_copilot.agent.prompts import (
 )
 from converter_copilot.agent.state import ConverterState
 from converter_copilot.domain.evidence import validate_report_evidence
+from converter_copilot.domain.equipment import classify_equipment_applicability
 from converter_copilot.domain.schemas import (
     CaseMatch,
     CaseRecord,
@@ -86,6 +89,8 @@ def make_research_node(deps):
             for item in web_results or []:
                 normalized.append(_web_evidence(item, task_id))
             for chunk in local_results or []:
+                target_equipment = str(state.get("inputs", {}).get("equipment_type") or "")
+                source_equipment = _source_equipment_type(chunk)
                 normalized.append(
                     Evidence(
                         evidence_id=chunk.chunk_id,
@@ -97,6 +102,8 @@ def make_research_node(deps):
                         locator=chunk.locator,
                         accessed_at=datetime.now(timezone.utc),
                         source_status="available",
+                        equipment_type=source_equipment,
+                        applicability=classify_equipment_applicability(target_equipment, source_equipment),
                     )
                 )
             return normalized
@@ -115,22 +122,20 @@ def make_clarification_node():
 
     def clarify(state: ConverterState) -> dict[str, Any]:
         warning = "Missing required operating_conditions; gather the missing context before drawing fault conclusions."
+        questions = _fault_clarification_questions(state.get("inputs", {}))
         report = ConverterReport(
             task_id=state["task_id"],
             mode=TaskMode.FAULT_ANALYSIS,
             result=FaultAnalysisReport(),
             claims=[],
             evidence=[],
+            clarification_questions=questions,
             quality_warnings=[warning],
             completion_status="partial",
         )
         return {
             "report": report,
-            "clarification_questions": [
-                "故障发生时的负载、电网电压和环境温度分别是多少？",
-                "故障前后是否发生启停、功率突变或保护动作？",
-                "请提供故障码、设备型号及可安全获取的波形或告警记录。",
-            ],
+            "clarification_questions": questions,
         }
 
     return clarify
@@ -153,18 +158,22 @@ def make_generate_node(deps):
             )
             return {"report": report, "clarification_questions": []}
 
-        source_text = [
-            f"[{item.evidence_id}] {item.title} ({item.locator or item.url or 'source'})\n{item.excerpt}"
-            for item in evidence
-        ]
+        source_text = [_format_fault_evidence(item) for item in evidence]
         question = f"Analyze fault inputs: {state['inputs']}"
         messages = [
             SystemMessage(content=FAULT_ANALYSIS_SYSTEM),
             HumanMessage(content=format_research_prompt(question, source_text)),
         ]
         structured_model = deps.model.with_structured_output(FaultAnalysisReport)
-        result = await structured_model.ainvoke(messages)
-        result = FaultAnalysisReport.model_validate(result)
+        schema_retry = False
+        try:
+            result = FaultAnalysisReport.model_validate(await structured_model.ainvoke(messages))
+        except ValidationError as error:
+            schema_retry = True
+            issue_paths = sorted({".".join(str(part) for part in item["loc"]) for item in error.errors(include_url=False, include_context=False, include_input=False)})
+            retry_note = "The previous structured response did not match the required schema. Correct these fields and return the complete report: " + ", ".join(issue_paths[:12])
+            retry_messages = [*messages, HumanMessage(content=retry_note)]
+            result = FaultAnalysisReport.model_validate(await structured_model.ainvoke(retry_messages))
         claims = [
             Claim(
                 claim_id=f"claim-{index}",
@@ -180,7 +189,7 @@ def make_generate_node(deps):
             result=result,
             claims=claims,
             evidence=evidence,
-            quality_warnings=[],
+            quality_warnings=["Structured output failed schema validation once and recovered after a bounded retry; review this report."] if schema_retry else [],
             completion_status="completed",
         )
         check = validate_report_evidence(provisional)
@@ -189,16 +198,53 @@ def make_generate_node(deps):
             **{claim_id: "conflicting" for claim_id in check.conflicting_claim_ids},
             **{claim_id: "unverified" for claim_id in check.unverified_claim_ids},
         }
-        claims = [claim.model_copy(update={"verification_status": status_by_claim[claim.claim_id]}) for claim in claims]
-        completion_status = "partial" if check.conflicting_claim_ids or check.unverified_claim_ids else "completed"
+        verified_hypotheses = []
+        verified_claims = []
+        omitted_hypotheses = []
+        retained_checks = list(result.checks)
+        for hypothesis, claim in zip(result.hypotheses, claims, strict=True):
+            verification_status = status_by_claim.get(claim.claim_id, "unverified")
+            if verification_status == "unverified":
+                omitted_hypotheses.append(hypothesis)
+                retained_checks.extend(hypothesis.checks)
+                continue
+            verified_hypotheses.append(hypothesis)
+            verified_claims.append(
+                claim.model_copy(
+                    update={
+                        "claim_id": f"claim-{len(verified_claims) + 1}",
+                        "verification_status": verification_status,
+                    }
+                )
+            )
+
+        result = result.model_copy(
+            update={
+                "hypotheses": verified_hypotheses,
+                "checks": list(dict.fromkeys(retained_checks)),
+            }
+        )
+        quality_warnings = list(provisional.quality_warnings) + list(check.warnings)
+        if omitted_hypotheses:
+            count = len(omitted_hypotheses)
+            noun = "hypothesis" if count == 1 else "hypotheses"
+            quality_warnings.append(
+                f"Omitted {count} {noun} without verifiable source citations; their checks were retained as diagnostic suggestions."
+            )
+        clarification_questions = _missing_context_questions(state.get("inputs", {}))
+        completion_status = "partial" if (
+            schema_retry or omitted_hypotheses or check.conflicting_claim_ids or clarification_questions
+        ) else "completed"
         report = provisional.model_copy(
             update={
-                "claims": claims,
-                "quality_warnings": check.warnings,
+                "result": result,
+                "claims": verified_claims,
+                "quality_warnings": quality_warnings,
+                "clarification_questions": clarification_questions,
                 "completion_status": completion_status,
             }
         )
-        return {"report": report, "clarification_questions": []}
+        return {"report": report, "clarification_questions": clarification_questions}
 
     return generate
 
@@ -438,3 +484,67 @@ def _web_evidence(item: Any, task_id: str) -> Evidence:
         accessed_at=datetime.now(timezone.utc),
         source_status="available",
     )
+
+
+def _source_equipment_type(chunk: Any) -> str | None:
+    metadata = getattr(chunk, "metadata", {}) or {}
+    value = metadata.get("equipment_type") if isinstance(metadata, dict) else None
+    if value and str(value).strip():
+        return str(value).strip()
+    text = str(getattr(chunk, "text", ""))
+    match = re.search(r"(?i)(?:^|\|\s*)equipment_type\s*:\s*([^|\r\n]+)", text)
+    return match.group(1).strip() if match else None
+
+
+def _format_fault_evidence(item: Evidence) -> str:
+    applicability = {
+        "direct": "直接匹配目标设备",
+        "related": "同系列/同类参考，不能单独证明目标设备根因",
+        "cross_equipment": "跨设备参考，仅作背景，不能支撑目标设备故障结论",
+        "unknown": "来源设备未标注，适用性未知",
+    }[item.applicability]
+    return (
+        f"[{item.evidence_id}] {item.title} ({item.locator or item.url or 'source'})\n"
+        f"设备类型：{item.equipment_type or '未标注'}；适用性：{applicability}\n{item.excerpt}"
+    )
+
+
+def _missing_context_questions(inputs: dict[str, object]) -> list[str]:
+    conditions = inputs.get("operating_conditions")
+    if not isinstance(conditions, dict):
+        return _fault_clarification_questions(inputs)
+    missing = [
+        str(key) for key, value in conditions.items()
+        if value is None or (isinstance(value, str) and value.strip().casefold() in {
+            "", "unknown", "missing", "not provided", "未知", "缺失", "未提供", "不详",
+        })
+    ]
+    return _fault_clarification_questions(inputs) if missing else []
+
+
+def _fault_clarification_questions(inputs: dict[str, object]) -> list[str]:
+    fault_code = str(inputs.get("fault_code") or "").upper()
+    symptom = str(inputs.get("symptom") or "")
+    if "DC_OV" in fault_code or "过压" in symptom or "overvoltage" in symptom.casefold():
+        return [
+            "请提供故障前后的母线波形及采样时间，注明告警触发时刻和当时的功率方向。",
+            "告警前后是否发生功率突变、并网切换或负载甩脱？请给出事件时间线。",
+            "请补充设备型号、固件版本，以及同一时间段的电网电压和运行功率。",
+        ]
+    if "AC_OC" in fault_code or "过流" in symptom or "overcurrent" in symptom.casefold():
+        return [
+            "请提供故障前后的三相电流测量值或波形，并标出保护触发时刻。",
+            "故障发生时处于预充、启动、稳态还是停机阶段？请提供状态切换时间。",
+            "请补充负载/功率、电网电压及设备型号、固件版本。",
+        ]
+    if "TEMP" in fault_code or "温升" in symptom or "过温" in symptom:
+        return [
+            "请提供模块温度随时间变化的记录，以及告警触发阈值和时刻。",
+            "请补充环境温度、负载/功率及冷却系统状态记录。",
+            "请注明设备型号、固件版本，以及温度传感器或测点位置。",
+        ]
+    return [
+        "请补充故障发生时的负载/功率、电网状态和环境条件。",
+        "请提供故障码、设备型号/固件版本及告警发生时间线。",
+        "故障前后是否发生启停、功率变化或保护动作？请注明各事件时间。",
+    ]

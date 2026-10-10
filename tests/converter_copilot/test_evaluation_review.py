@@ -24,6 +24,7 @@ def service(tmp_path):
             "inputs": {"equipment_type": "inverter", "symptom": "alarm"},
             "claims": [{"claim_id": "claim-1", "text": "Claim", "evidence_ids": ["evidence-1"]}],
             "evidence": [{"evidence_id": "evidence-1", "excerpt": "Excerpt", "locator": "page 1"}],
+            "output_context": {"completion_status": "partial", "clarification_questions": ["请提供母线波形。"]},
         }],
     })
     imported = review_service.import_review_bundle(bundle)
@@ -41,6 +42,7 @@ def test_bundle_import_is_idempotent_and_snapshots_are_immutable(service):
     assert imported.imported_count == 1
     assert again.reused is True
     assert reviews.get_example(example.review_id).example_id == "example-1"
+    assert reviews.get_example(example.review_id).output_context["clarification_questions"] == ["请提供母线波形。"]
 
 
 def test_review_and_rereview_append_history(service):

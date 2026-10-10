@@ -20,7 +20,9 @@ describe("ReportPage", () => {
     });
     render(<MemoryRouter initialEntries={["/tasks/task-1/report"]}><Routes><Route path="/tasks/:taskId/report" element={<ReportPage />} /></Routes></MemoryRouter>);
     expect((await screen.findAllByText("制动单元异常")).length).toBeGreaterThanOrEqual(2);
-    expect(screen.getByText("缺少证据")).toBeInTheDocument();
+    expect(screen.getByText("引用可追溯")).toBeInTheDocument();
+    expect(screen.getByText("待核验")).toBeInTheDocument();
+    expect(screen.getByText(/来源是否直接支持结论，仍需人工核验/)).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole("button", { name: "ev-1" })[0]);
     expect(await screen.findByText("设备手册")).toBeInTheDocument();
     expect(screen.getByText(/page 4/)).toBeInTheDocument();

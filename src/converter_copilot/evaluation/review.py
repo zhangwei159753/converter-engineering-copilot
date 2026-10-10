@@ -33,6 +33,7 @@ class ReviewBundleExample(BaseModel):
     task_id: str = Field(min_length=1)
     claims: list[dict[str, object]] = Field(default_factory=list)
     evidence: list[dict[str, object]] = Field(default_factory=list)
+    output_context: dict[str, object] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_snapshot_ids(self):
@@ -115,6 +116,7 @@ class EvaluationExample(BaseModel):
     task_id: str
     claims: list[dict[str, object]]
     evidence: list[dict[str, object]]
+    output_context: dict[str, object] = Field(default_factory=dict)
     status: Literal["pending", "reviewed"]
     reviewer_id: str | None = None
     reviewed_at: datetime | None = None
@@ -155,10 +157,11 @@ class EvaluationReviewService:
             for item in bundle.examples:
                 connection.execute(
                     """INSERT INTO evaluation_examples(review_id, bundle_id, example_id, mode, source_type,
-                    inputs_json, task_id, claims_json, evidence_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    inputs_json, task_id, claims_json, evidence_json, output_context_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         str(uuid4()), bundle.bundle_id, item.example_id, bundle.mode, item.source_type,
-                        _json(item.inputs), item.task_id, _json(item.claims), _json(item.evidence),
+                        _json(item.inputs), item.task_id, _json(item.claims), _json(item.evidence), _json(item.output_context),
                     ),
                 )
         return BundleImportResult(bundle_id=bundle.bundle_id, imported_count=len(bundle.examples), skipped_count=0)
@@ -351,6 +354,7 @@ class EvaluationReviewService:
             mode=row["mode"], dataset_version=row["dataset_version"], source_type=row["source_type"],
             inputs=json.loads(row["inputs_json"]), task_id=row["task_id"], claims=json.loads(row["claims_json"]),
             evidence=json.loads(row["evidence_json"]), status=row["status"], reviewer_id=row["reviewer_id"],
+            output_context=json.loads(row["output_context_json"]),
             reviewed_at=row["reviewed_at"], label_version=row["label_version"],
             evidence_labels=json.loads(row["evidence_labels_json"]),
             expected_retrieval_ids=json.loads(row["expected_retrieval_ids_json"]), note=row["note"],

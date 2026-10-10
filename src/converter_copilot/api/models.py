@@ -1,6 +1,8 @@
 """Stable API response models."""
 
-from pydantic import BaseModel, Field
+from typing import Literal
+
+from pydantic import BaseModel, Field, field_validator
 
 from converter_copilot.domain.schemas import ImportStatus, TaskRecord
 
@@ -47,3 +49,29 @@ class EvaluationReviewRequest(BaseModel):
     evidence_labels: list[dict[str, str]] = Field(default_factory=list)
     expected_retrieval_ids: list[str] = Field(default_factory=list)
     note: str | None = Field(default=None, max_length=2000)
+
+
+class WorkOrderReviewRequest(BaseModel):
+    """Validated local annotation for a completed work-order analysis."""
+
+    reviewer: str = Field(min_length=1, max_length=120)
+    verdict: Literal["accepted", "needs_more_information", "rejected"]
+    note: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("reviewer")
+    @classmethod
+    def reviewer_must_not_be_blank(cls, value: str) -> str:
+        """Trim reviewer attribution and reject whitespace-only input."""
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Reviewer is required.")
+        return normalized
+
+    @field_validator("note")
+    @classmethod
+    def normalize_note(cls, value: str | None) -> str | None:
+        """Normalize an empty optional note to null."""
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None

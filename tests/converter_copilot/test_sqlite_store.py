@@ -62,6 +62,8 @@ def test_foreign_keys_reject_orphan_events(tmp_path):
 
 
 def test_empty_database_migrates_to_current_version(tmp_path):
+    from converter_copilot.storage.migrations import CURRENT_SCHEMA_VERSION
+
     database = tmp_path / "empty.db"
     SQLiteStore(database)
 
@@ -69,7 +71,7 @@ def test_empty_database_migrates_to_current_version(tmp_path):
         version = connection.execute("PRAGMA user_version").fetchone()[0]
         columns = {row[1] for row in connection.execute("PRAGMA table_info(tasks)")}
 
-    assert version == 5
+    assert version == CURRENT_SCHEMA_VERSION
     with sqlite3.connect(database) as connection:
         tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert {"evaluation_bundles", "evaluation_examples", "evaluation_review_events"} <= tables
