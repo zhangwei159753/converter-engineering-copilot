@@ -59,6 +59,7 @@ logs/
 
 # Dependencies
 node_modules/
+*.tsbuildinfo
 
 # LangGraph specific
 .langgraph/
