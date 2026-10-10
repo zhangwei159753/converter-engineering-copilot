@@ -1,4 +1,4 @@
-import type { CaseImportResult, ConverterReport, ImportSummary, TaskAccepted, TaskEvent, TaskRecord } from "../types";
+import type { CaseImportResult, ConverterReport, EvaluationExample, EvaluationReviewEvent, EvaluationSummary, ImportSummary, TaskAccepted, TaskEvent, TaskRecord } from "../types";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -69,6 +69,28 @@ export function repairImport(importId: string): Promise<ImportSummary> {
 
 export function deleteImport(importId: string): Promise<ImportSummary> {
   return request<ImportSummary>(`/api/imports/${encodeURIComponent(importId)}`, { method: "DELETE" });
+}
+
+export function getEvaluationSummary(): Promise<EvaluationSummary> {
+  return request<EvaluationSummary>("/api/evaluations");
+}
+
+export function importReviewBundle(bundle: unknown): Promise<{ bundle_id: string; imported_count: number; skipped_count: number; reused: boolean }> {
+  return request("/api/evaluations/review-bundles", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(bundle) });
+}
+
+export function listEvaluationExamples(params: { mode?: string; status?: string; limit?: number; offset?: number } = {}): Promise<{ items: EvaluationExample[]; total: number }> {
+  const query = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => { if (value !== undefined && value !== "") query.set(key, String(value)); });
+  return request(`/api/evaluations/examples?${query}`);
+}
+
+export function saveEvaluationReview(reviewId: string, payload: { reviewer_id: string; evidence_labels: EvaluationExample["evidence_labels"]; expected_retrieval_ids: string[]; note?: string }): Promise<EvaluationReviewEvent> {
+  return request(`/api/evaluations/examples/${encodeURIComponent(reviewId)}/review`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+}
+
+export function getEvaluationHistory(reviewId: string): Promise<EvaluationReviewEvent[]> {
+  return request(`/api/evaluations/examples/${encodeURIComponent(reviewId)}/history`);
 }
 
 const pause = (milliseconds: number, signal: AbortSignal) => new Promise<void>((resolve) => {

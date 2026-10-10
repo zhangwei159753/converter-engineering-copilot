@@ -1,6 +1,6 @@
 """Stable API response models."""
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from converter_copilot.domain.schemas import ImportStatus, TaskRecord
 
@@ -38,3 +38,12 @@ class ImportSummary(BaseModel):
     updated_at: str
     error_code: str | None = None
     synthetic_demo: bool = False
+
+
+class EvaluationReviewRequest(BaseModel):
+    """Human review payload accepted by the local evaluation API."""
+
+    reviewer_id: str = Field(min_length=1, max_length=120)
+    evidence_labels: list[dict[str, str]] = Field(default_factory=list)
+    expected_retrieval_ids: list[str] = Field(default_factory=list)
+    note: str | None = Field(default=None, max_length=2000)

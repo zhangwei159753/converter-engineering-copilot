@@ -105,6 +105,28 @@ export interface ImportSummary {
   synthetic_demo: boolean;
 }
 
+export type EvidenceReviewLabel = "supported" | "unsupported" | "unverified";
+export interface EvaluationEvidence { evidence_id: string; excerpt?: string; source_type?: string; locator?: string | null; url?: string | null; source_status?: string; related_claim_ids?: string[] }
+export interface EvaluationClaim { claim_id: string; text: string; evidence_ids?: string[] }
+export interface EvaluationExample {
+  review_id: string; bundle_id: string; example_id: string; mode: string; dataset_version: string;
+  source_type: string; inputs: Record<string, unknown>; task_id: string; claims: EvaluationClaim[];
+  evidence: EvaluationEvidence[]; status: "pending" | "reviewed"; reviewer_id: string | null;
+  reviewed_at: string | null; label_version: number;
+  evidence_labels: Array<{ evidence_id: string; claim_id: string; label: EvidenceReviewLabel }>;
+  expected_retrieval_ids: string[]; note: string | null;
+}
+export interface EvaluationSummary {
+  modes: Record<string, { total: number; pending: number; reviewed: number; source_types: Record<string, number> }>;
+  dataset_versions: Array<{ mode: string; dataset_version: string }>;
+  retrieval_recall_at_k: number | null; manual_evidence_support_rate: number | null;
+  metric_status: Record<string, string>; metric_sample_counts: Record<string, number>;
+}
+export interface EvaluationReviewEvent {
+  review_id: string; label_version: number; reviewer_id: string; reviewed_at: string;
+  evidence_labels: EvaluationExample["evidence_labels"]; expected_retrieval_ids: string[]; note: string | null;
+}
+
 export interface FaultAnalysisInput {
   equipment_type: string;
   symptom: string;

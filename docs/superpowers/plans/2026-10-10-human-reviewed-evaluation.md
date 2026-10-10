@@ -99,12 +99,12 @@
 - `PUT /api/evaluations/examples/{example_id}/review` saves one reviewer payload and returns the current review plus audit history.
 - `GET /api/evaluations/examples/{example_id}/history` returns append-only reviews.
 
-- [ ] Add API tests for bundle import/deduplication, list/filter/pagination, validation errors, saved review, audit history, and explicit null metrics for unreviewed datasets.
-- [ ] Add UI tests for bundle upload, pending/reviewed counts, evidence inspection, review submission, history display, and insufficient-label explanation.
-- [ ] Run `uv run pytest tests/converter_copilot/test_evaluation_api.py -q` and `npm --prefix web test -- --run src/pages/EvaluationPage.test.tsx`; expected: endpoints and page are absent.
-- [ ] Add the evaluation router and a Web page with review-bundle JSON upload, source type/status filters, evidence excerpt/locator, label controls, reviewer attribution, and metric sample counts.
-- [ ] Re-run targeted tests and `npm --prefix web run build`; expected: review actions are visible and only explicitly reviewed labels affect displayed metrics.
-- [ ] Commit as `feat: add evaluation review workbench`.
+- [x] Add API tests for bundle import/deduplication, list/filter/pagination, validation errors, saved review, audit history, and explicit null metrics for unreviewed datasets.
+- [x] Add UI tests for bundle upload, pending/reviewed counts, evidence inspection, review submission, history display, and insufficient-label explanation.
+- [x] Run `uv run pytest tests/converter_copilot/test_evaluation_api.py -q` and `npm --prefix web test -- --run src/pages/EvaluationPage.test.tsx`; expected: endpoints and page are absent.
+- [x] Add the evaluation router and a Web page with review-bundle JSON upload, source type/status filters, evidence excerpt/locator, label controls, reviewer attribution, and metric sample counts.
+- [x] Re-run targeted tests and `npm --prefix web run build`; expected: review actions are visible and only explicitly reviewed labels affect displayed metrics.
+- [x] Commit as `feat: add evaluation review workbench`.
 
 ### Task 4: Document review governance and metric limits
 

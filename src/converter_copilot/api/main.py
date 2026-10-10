@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from converter_copilot.api.routes.cases import build_case_router, build_import_router
+from converter_copilot.api.routes.evaluations import build_evaluation_router
 from converter_copilot.api.routes.tasks import build_task_router
 from converter_copilot.api.runner import TaskRunner
 from converter_copilot.storage.sqlite_store import SQLiteStore
@@ -53,12 +54,13 @@ def create_app(runner: TaskRunner | None = None) -> FastAPI:
         CORSMiddleware,
         allow_origins=[origin],
         allow_credentials=False,
-        allow_methods=["GET", "POST"],
+        allow_methods=["GET", "POST", "PUT", "DELETE"],
         allow_headers=["Content-Type", "Last-Event-ID", "Idempotency-Key"],
     )
     app.include_router(build_task_router(runner))
     app.include_router(build_case_router(runner))
     app.include_router(build_import_router(runner))
+    app.include_router(build_evaluation_router(runner))
 
     @app.get("/api/health")
     def health():
