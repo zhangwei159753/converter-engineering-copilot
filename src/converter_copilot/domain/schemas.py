@@ -207,6 +207,15 @@ class TaskEvent(BaseModel):
     created_at: datetime
 
 
+class EvidenceCheckResult(BaseModel):
+    """Deterministic evidence-link validation summary for a report."""
+
+    supported_claim_ids: list[str] = Field(default_factory=list)
+    conflicting_claim_ids: list[str] = Field(default_factory=list)
+    unverified_claim_ids: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
 class ConverterReport(BaseModel):
     """Mode-specific result plus traceable claims and evidence."""
 
