@@ -1,107 +1,166 @@
 # Converter Engineering Copilot
 
-面向变流器研发与运维场景的证据驱动工程分析应用。它把本地技术资料、可选网页检索和结构化 LLM 工作流组织成可交互的 Web 工作台，支持故障现象分析、技术调研与实验设计、相似检修案例检索。
+面向变流器研发与运维场景的证据驱动工程分析工作台。系统将设备工况、企业本地技术资料、检修案例和可选网页来源组织到可追踪的分析任务中，辅助工程师开展故障现象分析、技术调研、实验设计和相似案例检索。
 
-本项目是基于 [LangChain 开源项目 `open_deep_research`](https://github.com/langchain-ai/open_deep_research) 的个人工程改造，保留上游研究 Agent，并新增 Converter Copilot 产品层。上游采用 MIT License；本仓库保留原始 [LICENSE](LICENSE)。项目中的变流器案例均为人工编写的合成演示样例，不代表真实现场记录、制造商结论或已验证维修结果。
+项目在 LangChain `open_deep_research` 的研究工作流基础上构建变流器工程应用层，包含领域数据模型、资料导入与检索、持久化任务服务、Web 工作台、人工评测和工单辅助研判。服务端使用 Python、FastAPI、LangGraph 和 SQLite；文档向量保存在本地 Chroma，中文向量默认由 FastEmbed 的 `BAAI/bge-small-zh-v1.5` 生成。前端使用 React、TypeScript 和 Vite。
 
 ## 功能
 
-- **故障现象分析**：要求补充工况；并行检索本地文档和可选网页来源；给出候选假设、核验步骤和引用。
-- **技术调研与实验设计**：整理技术路线、实验条件、局限和可复现实验步骤。
-- **检修案例检索**：导入 PDF、Markdown 或 CSV，以本地向量检索和结构化字段对照历史案例。
-- **交互式 Web 工作台**：创建任务、查看 SSE 进度、打开来源摘录、回看任务和导出 Markdown 报告。
-- **工单辅助研判台**：查看只读合成工单、检查设备上下文与缺失字段、发起故障分析、查看关联证据报告并追加人工审核记录。
-- **人工评测工作台**：导入模型运行的证据快照，标注证据支持度和检索金标准，追踪复核版本；未复核标签不参与质量指标。
-- **多 Agent 协作审计**：将故障研判拆成受预算限制的角色步骤，呈现执行时间线、候选假设分支、支持与反对证据、适用性门禁和审核未完成状态；不暴露私有 CoT。
-- **复核记忆检索**：只从可追溯且被工程师接受的报告构建关联，工单展示来源工单、复核版本、适用差异和报告证据链接；不把相似度解释成因果概率。
-- **离线策略对比**：使用同一数据集对比 baseline 和 collaborative，将结构指标与人工质量指标分开；评测摘要可在浏览器本地导入查看。
+- **故障现象分析**：检查工况信息完整性，检索本地资料和可选网页来源，形成带引用的候选假设与核验步骤。
+- **技术调研与实验设计**：整理技术路线、实验条件、约束、局限和可复现实验步骤。
+- **检修案例检索**：导入 PDF、Markdown 或 CSV，按设备与现象检索案例，并展示匹配字段、差异和来源。
+- **任务工作台**：创建分析任务、查看实时进度、定位引用摘录、回看历史任务并导出 Markdown 报告。
+- **工单辅助研判**：检查工单上下文与缺失字段，关联故障分析报告，并追加带版本的人工审核记录。
+- **人工评测与策略对比**：导入评测快照、复核证据支持度与检索金标准，并对比 baseline 和 collaborative 策略。
+- **协作过程审计**：查看 Agent 执行阶段、候选假设、证据支持与反对信息、预算和审核状态。
+- **复核记忆检索**：从符合条件且经工程师接受的历史报告中检索相关信息，并展示设备差异和证据来源。
 
-## 本机运行
+## 工程设计
 
-需要 Python 3.11、[uv](https://docs.astral.sh/uv/)、Node.js 20+ 和 npm。任务分析需要 DeepSeek API key；文档向量使用本地 FastEmbed 模型，首次启动时会下载模型文件。Tavily 和 LangSmith 是可选服务。没有 Tavily key 时，系统仍可使用本地资料检索。
+### 持久化任务与断线恢复
 
-1. 从模板创建 `.env`，在 API 使用的环境中填写 `DEEPSEEK_API_KEY`。`DEEPSEEK_BASE_URL` 默认指向 DeepSeek 官方 API；`TAVILY_API_KEY` 和 LangSmith 设置可留空。
+任务创建时，API 先将请求、幂等键和首条事件写入 SQLite，再返回任务编号。后台 worker 从数据库领取任务，通过续租和执行次数限制管理运行状态。浏览器使用 SSE 接收进度，并可用 `Last-Event-ID` 从断点继续读取。服务重启后，已排队任务会继续执行，过期租约下的任务会重新排队；因此任务采用至少一次执行语义，外部模型调用在进程中断时可能重复。
 
-   ```powershell
-   Copy-Item .env.example .env
-   ```
+### 可追溯的证据链
 
-2. 启动 API：
+报告引用关联到检索得到的来源摘录和定位信息。确定性校验器检查引用 ID 是否存在、来源状态是否冲突，避免报告引用无关来源；这项校验不代表系统独立证明了工程结论。缺少关键工况或有效证据时，工作流会请求补充信息或返回部分报告，不生成无证据支持的候选结论。
 
-   ```powershell
-   uv sync --frozen
-   uv run uvicorn converter_copilot.api.main:app --reload --port 8000
-   ```
+### 可恢复的本地资料导入
 
-3. 在另一个终端启动 Web 前端：
+导入器支持 PDF、Markdown 和 CSV。系统先校验文件，再为原文和片段生成稳定标识，并在 SQLite 导入台账中记录解析版本、切块版本和预期索引数量。SQLite 与 Chroma 不能共享事务，服务会在启动时重放未完成导入；相同内容和版本可幂等重放，避免重复生成案例和向量。Web 来源台账可查看导入状态并发起修复。
 
-   ```powershell
-   cd web
-   npm ci
-   npm run dev
-   ```
+### 人工复核与质量评测
 
-4. 打开 <http://localhost:5173>。API 文档在 <http://localhost:8000/docs>，`/api/health` 检查进程存活，`/api/ready` 检查 SQLite 能否在 1 秒内获得写锁并确认后台 worker 正在运行。
+评测快照保存报告声明、证据内容和来源定位，复核标签以追加版本方式记录。只有明确完成人工复核的样本进入证据支持度和检索质量指标；没有合格标签时指标保持空值。策略比较使用相同样本分别运行 baseline 与 collaborative，并将结构完整性指标与人工质量指标分开呈现。
 
-数据库、Chroma 向量索引、FastEmbed 模型缓存和评测结果默认写入 `.data/`。文档导入接受 `.pdf`、`.md` 和 `.csv`。向量模型默认使用适合中文技术资料的 `BAAI/bge-small-zh-v1.5`，首次导入或检索时会下载模型；需要联网及约 100 MB 磁盘空间。向量集合使用新的 `converter_engineering_copilot_bge_small_zh_v1_5` 名称，保留旧 OpenAI 向量集合不动；已有资料需重新导入以生成本地向量。不要上传未经授权的工厂、客户或个人数据。
+### 多 Agent 故障分析
 
-### 本地任务可靠性
+协作策略将故障分析拆为工况整理、证据检索、候选假设、独立证据审查、适用性检查和报告整理等受预算限制的步骤。系统持久化阶段状态、耗时、引用和结构化审查结果，供用户审阅；不展示私有思维链。历史检修相似度作为检索线索，并附带适用差异，不解释为故障因果概率。
 
-SQLite 在 API 启动时执行版本化迁移。升级已有非空数据库前，应用会通过 SQLite 在线备份生成一致副本，默认放在 `.data/backups/`，文件名包含原数据库名、目标 schema 版本和时间。迁移或备份失败时不会启动 worker；`/api/health` 仍返回进程存活，`/api/ready` 返回 HTTP 503。迁移前请确认备份目录所在磁盘有足够空间。
+## 系统工作流
 
-此版本按单机单实例运行：一个 API 进程独占 `.data/` 下的 SQLite、Chroma 和模型缓存。不要启动多个 API 容器或进程共享同一数据目录。Compose 已将这些数据放在 `converter_data` 命名卷中。
+~~~mermaid
+flowchart LR
+    U[工程师] --> UI[React Web 工作台]
+    UI -->|REST 创建任务 / 查询报告| API[FastAPI]
+    UI <-->|SSE 进度事件| API
+    API -->|事务写入任务、事件与导入台账| DB[(SQLite)]
+    DB --> W[持久化任务 Worker]
+    W --> G[LangGraph 工程工作流]
+    G --> R[本地与可选网页检索]
+    R --> C[(Chroma 向量索引)]
+    C --> E[FastEmbed 本地中文向量]
+    G --> L[DeepSeek 模型服务]
+    G -->|引用校验后的报告| DB
+    UI -->|人工复核与标签| DB
+~~~
 
-后台 worker 从 SQLite 中领取已排队任务，默认并发为 1。服务重启后会继续处理排队任务；运行中任务的租约过期后会重新排队，达到最大尝试次数后转为失败。任务处理按“至少一次”保证：进程在模型调用期间退出时，模型调用可能再次发生，因此外部调用和费用可能重复；报告与终态事件仍在一个 SQLite 事务中提交。
+主要分析流程：
 
-可在 `.env` 中调整以下设置，默认值适用于本地单机：
+1. 用户在 Web 中提交任务，API 校验输入并持久化任务。
+2. Worker 按租约领取任务，LangGraph 工作流执行工况检查、检索和分析。
+3. 工作流生成带来源 ID 的结构化结果，引用校验器检查来源是否可追溯。
+4. API 持久化报告与终态事件；浏览器通过 SSE 更新进度并读取报告及来源摘录。
+5. 工程师可对证据和结论进行复核，复核记录用于评测和后续记忆检索。
 
-### 导入校验与恢复
+## 技术栈
 
-导入器先在内存/临时目录完成校验，之后才写入导入台账、SQLite 案例或 Chroma。默认限制为单文件 20 MiB、PDF 200 页、CSV 10,000 行、每个文件 2,000 个文本片段；可用 `IMPORT_MAX_BYTES`、`IMPORT_MAX_PDF_PAGES`、`IMPORT_MAX_CSV_ROWS`、`IMPORT_MAX_CHUNKS` 调整。CSV 必须是 UTF-8，包含唯一且非空的表头，以及每行必填的 `symptom`；错误响应包含稳定错误码和行号，不回显上传文本。
+| 模块 | 技术 |
+| --- | --- |
+| API 服务 | Python 3.11、FastAPI、Uvicorn |
+| 工作流 | LangGraph、LangChain |
+| 模型 | DeepSeek（可配置 API 地址和模型名） |
+| 文档检索 | Chroma、FastEmbed、`BAAI/bge-small-zh-v1.5` |
+| 任务与业务数据 | SQLite、版本化迁移、后台 Worker |
+| Web | React、TypeScript、Vite、Nginx |
+| 本地部署 | Docker Compose |
 
-校验通过后，原文件按内容哈希、解析器版本和切块版本计算稳定导入 ID，原始字节原子保存在 `CONVERTER_SOURCE_DIR`（默认 `.data/sources/`）。SQLite 保存导入状态、哈希、版本、预期片段数和安全错误码；API 和 Web 页面不会暴露本机绝对路径。相同内容与版本重复上传时复用现有台账、案例和 Chroma 向量；解析器或切块版本变化会生成新的导入身份。
+## 快速开始
 
-工作台的“来源台账”显示导入状态、已索引片段和案例数量。启动时会重放 `validated`、`indexing` 等未完成导入，Web 也提供手动修复。SQLite 与 Chroma 不共享事务，因此台账会保留不完整状态；重放使用稳定 ID 的 upsert，避免生成重复向量或案例。缺失原文件时，先重新上传相同文件恢复本地副本，再执行修复。删除需要浏览器确认；系统按顺序移除对应向量、导入案例和原文件，若中断可继续删除。删除后重新上传相同文件会重新导入。
+### 环境要求
 
-每条 CSV 案例通过 `record_type=synthetic_demo_fixture` 标记为合成演示数据；工作台明确标示此类数据不是现场记录。导入完成仅表示文件通过结构校验并写入本地检索，不代表工程内容、故障结论或维修效果经过验证。
+- Python 3.11 和 [uv](https://docs.astral.sh/uv/)
+- Node.js 20+ 和 npm
+- 分析任务需要可用的 DeepSeek API Key
+- 首次导入或检索时会下载 FastEmbed 模型（约 100 MB）
 
-| 环境变量 | 默认值 | 含义 |
-| --- | ---: | --- |
-| `CONVERTER_WORKER_CONCURRENCY` | `1` | 同时执行的任务数 |
-| `CONVERTER_WORKER_POLL_SECONDS` | `0.5` | 空闲 worker 的轮询间隔 |
-| `CONVERTER_TASK_LEASE_SECONDS` | `60` | 任务租约及续租时长 |
-| `CONVERTER_TASK_TIMEOUT_SECONDS` | `1800` | 单任务最长执行时间 |
-| `CONVERTER_TASK_MAX_ATTEMPTS` | `3` | worker 自动恢复的最大执行次数 |
+### 本地开发
 
-任务详情页显示执行尝试次数、租约恢复事件和按错误码生成的安全处理建议。API 和任务事件不会返回 worker ID、密钥或原始异常文本；需要排查时请查看本机 API 服务日志。若需恢复迁移前备份，请先停止 API，再将选定的备份文件复制为 `CONVERTER_DB_PATH` 指向的数据库文件，然后重新启动服务。
+在仓库根目录创建配置文件，并在其中设置 `DEEPSEEK_API_KEY`：
 
-## Docker Compose
+~~~powershell
+Copy-Item .env.example .env
+uv sync --frozen
+uv run uvicorn converter_copilot.api.main:app --reload --port 8000
+~~~
 
-安装 Docker Desktop，创建 `.env` 并填写 `DEEPSEEK_API_KEY`，然后运行：
+另开一个终端启动 Web：
 
-```powershell
+~~~powershell
+cd web
+npm ci
+npm run dev
+~~~
+
+访问 <http://localhost:5173> 打开工作台，访问 <http://localhost:8000/docs> 查看 API 文档。`/api/health` 检查进程存活，`/api/ready` 检查 SQLite 写入能力和后台 Worker 状态。
+
+本地数据默认保存在 `.data/`，包括 SQLite 数据库、Chroma 索引、FastEmbed 模型缓存、导入原文和评测结果。首次下载模型和调用模型服务需要网络连接。
+
+### Docker Compose
+
+在 `.env` 中配置 `DEEPSEEK_API_KEY` 后启动：
+
+~~~powershell
 docker compose up --build
-```
+~~~
 
-Web 工作台在 <http://localhost:5173>，API 文档在 <http://localhost:8000/docs>。Compose 使用命名卷保存数据库、Chroma 和 FastEmbed 模型；模型、搜索、LangSmith 密钥仅传给 API 容器，Web 镜像不包含这些密钥。DeepSeek key 没有配置时，页面和存活检查仍可打开，但模型任务会失败并展示安全错误指引。查看 API 日志可用 `docker compose logs -f api`；停止服务但保留本地数据可用 `docker compose down`。
+Web 工作台和 API 文档分别位于 <http://localhost:5173> 与 <http://localhost:8000/docs>。Compose 中的 Nginx 容器提供构建后的静态前端并代理 API 请求，`converter_data` 命名卷保存本地数据；停止服务但保留数据可运行 `docker compose down`。
 
-## 评测
+## 配置
 
-```powershell
+可在 `.env` 中修改以下设置，完整模板见 [`.env.example`](.env.example)：
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `DEEPSEEK_API_KEY` | 空 | 调用模型执行分析任务所需的 API Key |
+| `DEEPSEEK_BASE_URL` | `https://api.deepseek.com` | 模型服务地址 |
+| `CONVERTER_MODEL` | `deepseek-flash` | 分析任务使用的模型 |
+| `TAVILY_API_KEY` | 空 | 可选网页检索凭据；留空时仍可使用本地资料 |
+| `LANGSMITH_TRACING` | `false` | 是否启用 LangSmith 链路追踪 |
+| `CONVERTER_DB_PATH` | `.data/converter_copilot.db` | SQLite 数据库路径 |
+| `CHROMA_PERSIST_DIR` | `.data/chroma` | Chroma 索引目录 |
+| `FASTEMBED_MODEL` | `BAAI/bge-small-zh-v1.5` | 本地向量模型 |
+| `CONVERTER_WORKER_CONCURRENCY` | `1` | 后台任务并发数 |
+| `CONVERTER_TASK_MAX_ATTEMPTS` | `3` | 单个任务最大执行次数 |
+
+LangSmith 追踪可能包含提示词和模型输入，应只连接经批准的数据环境。更多 worker、任务租约和导入限制参数见 [本地运维指南](docs/operations.md)。
+
+## 运行示例与评测
+
+完整演示流程见[演示场景](docs/demo-scenario.md)，包含合成检修案例导入、相似案例检索、故障分析、引用检查和工单辅助研判。
+
+运行确定性产品测试：
+
+~~~powershell
 uv run pytest tests/converter_copilot -q
+~~~
+
+运行模型工作流评测需要配置 `DEEPSEEK_API_KEY`：
+
+~~~powershell
 uv run python evals/converter_copilot/run_eval.py
 uv run python evals/converter_copilot/run_eval.py --mode fault_analysis --compare-strategies --recall-at-k 5
-```
+~~~
 
-评测执行真实工作流，需要 `DEEPSEEK_API_KEY`。`--compare-strategies` 会对每条样例各运行 baseline 和 collaborative 一次，模型调用约为单策略运行的两倍；输出摘要与每种策略独立的 review bundle 写到 `.data/evaluation_results/`。在 Web 左侧进入“人工评测”，通过“导入 Agent 离线评测结果”在浏览器本地查看策略比较，再分别导入 review bundle 检查证据摘录与定位、人工标注。仓库中的合成起始样例没有检索金标准和人工支持标签，人工质量指标会保持 `null`；结构完整度不能替代准确率或现场验证。评测字段、复核过程和指标限制见 [评测说明](evals/converter_copilot/README.md)。
+仓库内案例为合成演示数据。初始样例没有检索金标准和人工支持标签，因此不能据此报告现场准确率或维修效果；人工质量指标在尚无复核样本时保持空值。评测输出和复核流程见[评测说明](evals/converter_copilot/README.md)。
 
-## 演示路径与设计说明
+## 项目文档
 
-- [演示场景](docs/demo-scenario.md)：用合成工单走完字段核对、分析任务、证据报告和人工审核，并可导入合成 CSV 走检索流程。
-- [系统架构](docs/architecture.md)：模块边界、数据路径、失败状态和部署方式。
-- [本地运维指南](docs/operations.md)：数据恢复、导入修复、人工评测和 CI 检查流程。
-- 工单工作台从左侧“工单研判”进入。数据来自包内合成样例，只读且不访问企业工单系统或设备遥测；审核是本地自由文本记录，不代表外部工单状态已变更。
+- [演示场景](docs/demo-scenario.md)：按 Web 工作流逐步体验任务、报告和人工复核。
+- [系统架构](docs/architecture.md)：模块职责、请求生命周期、数据路径与失败处理。
+- [本地运维指南](docs/operations.md)：数据库备份恢复、导入修复、配置和 CI 检查。
+- [评测说明](evals/converter_copilot/README.md)：指标定义、人工标签和策略比较方法。
 
-## 边界
+## 数据与使用范围
 
-此应用提供研发与维护人员复核的辅助信息，不会连接或控制变流器，不会自动下发控制指令，也不会把相似案例当成故障因果证明。模型输出需由具备资质的工程人员结合设备手册、现场规程和测量结果核验。
+应用为研发与维护人员提供可追溯的分析材料，不连接或控制变流器，也不会自动下发设备指令。案例检索和模型报告用于辅助复核；工程结论应结合授权技术资料、实际测量和现场规程确认。项目保留上游 [open_deep_research](https://github.com/langchain-ai/open_deep_research) 的 MIT 许可声明，详见 [LICENSE](LICENSE)。
